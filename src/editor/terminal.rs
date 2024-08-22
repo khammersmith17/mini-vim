@@ -5,6 +5,9 @@ use crossterm::terminal::{disable_raw_mode, enable_raw_mode, size, Clear, ClearT
 use crossterm::{queue, Command};
 use std::io::{stdout, Error, Write};
 
+/// Setting the terminal size and position to usize
+/// This also handles edge cases
+/// Handles the ambiguity between what crossterm accepts accross different methods
 #[derive(Copy, Clone)]
 pub struct Size {
     pub height: usize,
@@ -13,6 +16,12 @@ pub struct Size {
 
 #[derive(Copy, Clone)]
 pub struct Position {
+    pub x: usize,
+    pub y: usize,
+}
+
+#[derive(Copy, Clone)]
+pub struct Location {
     pub x: usize,
     pub y: usize,
 }
