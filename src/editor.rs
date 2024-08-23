@@ -1,5 +1,8 @@
-use crossterm::event::{read, Event, Event::Key, KeyCode, KeyEvent, KeyModifiers};
-use KeyCode::{Char, Down, End, Home, Left, PageDown, PageUp, Right, Up};
+use crossterm::event::{
+    read,
+    Event::{self, Key},
+    KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
+};
 mod terminal;
 use std::cmp::{max, min};
 use std::io::Error;
@@ -16,11 +19,13 @@ pub struct Editor {
 impl Editor {
     pub const fn new() -> Self {
         #[allow(clippy::as_conversions)]
+        let x_start: usize = 0;
+        let y_start: usize = 0;
         Editor {
             should_quit: false,
             position: Position {
-                x: 0 as usize,
-                y: 0 as usize,
+                x: x_start,
+                y: y_start,
             },
         }
     }
@@ -46,18 +51,25 @@ impl Editor {
 
     fn evaluate_event(&mut self, event: &Event) -> Result<(), Error> {
         if let Key(KeyEvent {
-            code, modifiers, ..
+            code,
+            modifiers,
+            kind: KeyEventKind::Press,
+            ..
         }) = event
         {
             match code {
-                Char('q') if *modifiers == KeyModifiers::CONTROL => {
+                KeyCode::Char('q') if *modifiers == KeyModifiers::CONTROL => {
                     self.should_quit = true;
                 }
-                Up | Down | Left | Right => {
-                    self.handle_arrows(*code)?;
-                }
-                PageUp | PageDown | End | Home => {
-                    self.handle_edge_keys(*code)?;
+                KeyCode::Up
+                | KeyCode::Down
+                | KeyCode::Left
+                | KeyCode::Right
+                | KeyCode::PageUp
+                | KeyCode::PageDown
+                | KeyCode::End
+                | KeyCode::Home => {
+                    self.move_cursor(*code)?;
                 }
                 _ => (),
             }
@@ -115,37 +127,30 @@ impl Editor {
         Ok(())
     }
 
-    fn handle_arrows(&mut self, code: KeyCode) -> Result<(), Error> {
+    fn move_cursor(&mut self, code: KeyCode) -> Result<(), Error> {
         match code {
-            Down => {
+            KeyCode::Down => {
                 self.position.y = min(self.position.y.saturating_add(1), Terminal::size()?.width);
             }
-            Up => {
+            KeyCode::Up => {
                 self.position.y = max(self.position.y.saturating_sub(1), 0);
             }
-            Left => {
+            KeyCode::Left => {
                 self.position.x = max(self.position.x.saturating_sub(1), 0);
             }
-            Right => {
+            KeyCode::Right => {
                 self.position.x = min(self.position.x.saturating_add(1), Terminal::size()?.height);
             }
-            _ => {}
-        }
-        Ok(())
-    }
-
-    fn handle_edge_keys(&mut self, code: KeyCode) -> Result<(), Error> {
-        match code {
-            PageDown => {
+            KeyCode::PageDown => {
                 self.position.y = Terminal::size()?.height;
             }
-            PageUp => {
+            KeyCode::PageUp => {
                 self.position.y = 0;
             }
-            End => {
+            KeyCode::End => {
                 self.position.x = 0;
             }
-            Home => {
+            KeyCode::Home => {
                 self.position.x = Terminal::size()?.width;
             }
             _ => {}
