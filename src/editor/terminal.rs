@@ -1,26 +1,25 @@
-use core::fmt::Display;
+use crate::editor::{PROGRAM_NAME, PROGRAM_VERSION};
 use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::style::Print;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, size, Clear, ClearType};
 use crossterm::{queue, Command};
 use std::io::{stdout, Error, Write};
-
 /// Setting the terminal size and position to usize
 /// This also handles edge cases
 /// Handles the ambiguity between what crossterm accepts accross different methods
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct Size {
     pub height: usize,
     pub width: usize,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct Position {
     pub x: usize,
     pub y: usize,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct Location {
     pub x: usize,
     pub y: usize,
@@ -32,7 +31,6 @@ impl Terminal {
     pub fn initialize() -> Result<(), Error> {
         enable_raw_mode()?;
         Self::clear_screen()?;
-        Self::move_cursor_to(Position { x: 0, y: 0 })?;
         Self::execute()?;
         Ok(())
     }
@@ -57,6 +55,9 @@ impl Terminal {
         Self::queue_command(MoveTo(position.x as u16, position.y as u16))?;
         Ok(())
     }
+
+    ///Returns the size of the terminal
+    ///When usize < u16, defaults to usize
     pub fn size() -> Result<Size, std::io::Error> {
         let (height, width) = size()?;
         #[allow(clippy::as_conversions)]
@@ -65,7 +66,7 @@ impl Terminal {
             width: width as usize,
         })
     }
-    pub fn print<T: Display>(output: T) -> Result<(), Error> {
+    pub fn print(output: &str) -> Result<(), Error> {
         Self::queue_command(Print(output))?;
         Ok(())
     }
@@ -87,6 +88,49 @@ impl Terminal {
 
     pub fn queue_command<T: Command>(command: T) -> Result<(), Error> {
         queue!(stdout(), command)?;
+        Ok(())
+    }
+}
+
+pub struct View;
+
+impl View {
+    pub fn render() -> Result<(), Error> {
+        let Size { height, .. } = Terminal::size()?;
+        let test_height = height / 5;
+        for current_row in 0..test_height {
+            Terminal::clear_line()?;
+            #[allow(clippy::integer_division)]
+            if current_row == 0 {
+                Terminal::print("~Hello World!")?;
+            } else if current_row == test_height / 3 {
+                Self::draw_welcome_message()?;
+            } else {
+                Self::draw_empty_row()?;
+            }
+            if current_row.saturating_add(1) < test_height {
+                Terminal::print("\r\n")?;
+            }
+        }
+        Ok(())
+    }
+
+    fn draw_empty_row() -> Result<(), Error> {
+        Terminal::print("~")?;
+        Ok(())
+    }
+
+    fn draw_welcome_message() -> Result<(), Error> {
+        let mut welcome_message = format!("{PROGRAM_NAME} editor -- version {PROGRAM_VERSION}");
+        let width = Terminal::size()?.width;
+        let len = welcome_message.len();
+        #[allow(clippy::integer_division)]
+        let padding = (width.saturating_sub(len)) / 2;
+
+        let spaces = " ".repeat(padding.saturating_sub(1));
+        welcome_message = format!("~{spaces}{welcome_message}");
+        welcome_message.truncate(width);
+        Terminal::print(&welcome_message)?;
         Ok(())
     }
 }
