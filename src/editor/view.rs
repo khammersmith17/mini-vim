@@ -14,13 +14,15 @@ pub struct View {
 impl View {
     pub fn render(&self) -> Result<(), Error> {
         let Size { height, .. } = Terminal::size()?;
-        let buffer_len = self.buffer.text.len().saturating_sub(1);
         for current_row in 0..height {
             Terminal::clear_line()?;
             #[allow(clippy::integer_division)]
-            if current_row <= buffer_len {
-                Terminal::print(&self.buffer.text[current_row])?;
-            } else if current_row == height / 3 {
+            if let Some(line) = self.buffer.text.get(current_row) {
+                Terminal::print(&line)?;
+                Terminal::print("\r\n")?;
+                continue;
+            }
+            if current_row == height / 3 {
                 Self::draw_welcome_message()?;
             } else {
                 Self::draw_empty_row()?;

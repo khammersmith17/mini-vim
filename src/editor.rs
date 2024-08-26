@@ -20,7 +20,6 @@ pub struct Editor {
 impl Editor {
     pub fn run(&mut self) {
         Terminal::initialize().unwrap();
-        self.view.buffer.text.push(String::from("Hello World"));
         let result = self.repl();
         Terminal::terminate().unwrap();
         result.unwrap();
