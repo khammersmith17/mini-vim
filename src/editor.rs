@@ -6,20 +6,21 @@ use crossterm::event::{
 mod terminal;
 use std::cmp::{max, min};
 use std::io::Error;
-use terminal::{Position, Size, Terminal, View};
-
-const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
-const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
+use terminal::{Position, Size, Terminal};
+mod view;
+use view::View;
 
 #[derive(Default)]
 pub struct Editor {
     should_quit: bool,
     cursor_position: Position,
+    view: View,
 }
 
 impl Editor {
     pub fn run(&mut self) {
         Terminal::initialize().unwrap();
+        self.view.buffer.text.push(String::from("Hello World"));
         let result = self.repl();
         Terminal::terminate().unwrap();
         result.unwrap();
@@ -72,7 +73,7 @@ impl Editor {
             Terminal::clear_screen()?;
             Terminal::print("Goodbye.\r\n")?;
         } else {
-            View::render()?;
+            self.view.render()?;
             Terminal::move_cursor_to(Position {
                 x: self.cursor_position.x,
                 y: self.cursor_position.y,
