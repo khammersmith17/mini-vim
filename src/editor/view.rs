@@ -16,13 +16,13 @@ impl View {
         let Size { height, .. } = Terminal::size()?;
         for current_row in 0..height {
             Terminal::clear_line()?;
-            #[allow(clippy::integer_division)]
             if let Some(line) = self.buffer.text.get(current_row) {
-                Terminal::print(&line)?;
+                Terminal::print(line)?;
                 Terminal::print("\r\n")?;
                 continue;
             }
-            if current_row == height / 3 {
+            #[allow(clippy::integer_division)]
+            if (current_row == height / 3) & self.buffer.is_empty() {
                 Self::draw_welcome_message()?;
             } else {
                 Self::draw_empty_row()?;

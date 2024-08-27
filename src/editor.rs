@@ -5,6 +5,8 @@ use crossterm::event::{
 };
 mod terminal;
 use std::cmp::{max, min};
+use std::env::args;
+use std::fs::read_to_string;
 use std::io::Error;
 use terminal::{Position, Size, Terminal};
 mod view;
@@ -18,11 +20,19 @@ pub struct Editor {
 }
 
 impl Editor {
-    pub fn run(&mut self) {
+    pub fn run(&mut self) -> Result<(), Error> {
         Terminal::initialize().unwrap();
+        let args: Vec<String> = args().collect();
+        if let Some(filename) = args.get(1) {
+            let file_contents = read_to_string(filename)?;
+            for line in file_contents.lines() {
+                self.view.buffer.text.push(line.to_string());
+            }
+        }
         let result = self.repl();
         Terminal::terminate().unwrap();
         result.unwrap();
+        Ok(())
     }
 
     fn repl(&mut self) -> Result<(), Error> {
