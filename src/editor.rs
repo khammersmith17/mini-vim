@@ -6,7 +6,6 @@ use crossterm::event::{
 mod terminal;
 use std::cmp::{max, min};
 use std::env::args;
-use std::fs::read_to_string;
 use std::io::Error;
 use terminal::{Position, Size, Terminal};
 mod view;
@@ -20,18 +19,25 @@ pub struct Editor {
 }
 
 impl Editor {
-    pub fn run(&mut self) -> Result<(), Error> {
+    pub fn run(&mut self) {
         Terminal::initialize().unwrap();
-        let args: Vec<String> = args().collect();
-        if let Some(filename) = args.get(1) {
-            let file_contents = read_to_string(filename)?;
-            for line in file_contents.lines() {
-                self.view.buffer.text.push(line.to_string());
-            }
-        }
+        self.handle_args();
+        self.load_screen().unwrap();
         let result = self.repl();
         Terminal::terminate().unwrap();
         result.unwrap();
+    }
+
+    fn handle_args(&mut self) {
+        let args: Vec<String> = args().collect();
+        if let Some(filename) = args.get(1) {
+            self.view.load(filename);
+        }
+    }
+
+    fn load_screen(&mut self) -> Result<(), Error> {
+        self.view.size = Terminal::size()?;
+        self.view.render()?;
         Ok(())
     }
 
@@ -72,10 +78,15 @@ impl Editor {
                 _ => (),
             }
         }
+        let size = Terminal::size()?;
+        if size != self.view.size {
+            self.view.size = size;
+            self.view.needs_redraw = true;
+        }
         Ok(())
     }
 
-    fn refresh_screen(&self) -> Result<(), Error> {
+    fn refresh_screen(&mut self) -> Result<(), Error> {
         Terminal::hide_cursor()?;
         Terminal::move_cursor_to(Position::default())?;
         if self.should_quit {

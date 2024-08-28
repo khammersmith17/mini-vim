@@ -6,7 +6,7 @@ use std::io::{stdout, Error, Write};
 /// Setting the terminal size and position to usize
 /// This also handles edge cases
 /// Handles the ambiguity between what crossterm accepts accross different methods
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, PartialEq)]
 pub struct Size {
     pub height: usize,
     pub width: usize,
