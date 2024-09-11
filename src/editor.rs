@@ -1,6 +1,5 @@
 use crossterm::event::{read, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 mod terminal;
-use std::cmp::{max, min};
 use std::env::args;
 use std::io::Error;
 use std::panic::{set_hook, take_hook};
@@ -11,7 +10,6 @@ use view::View;
 #[derive(Default)]
 pub struct Editor {
     should_quit: bool,
-    cursor_position: Position,
     view: View,
 }
 
@@ -30,7 +28,6 @@ impl Editor {
         }
         Ok(Self {
             should_quit: false,
-            cursor_position: Position::default(),
             view,
         })
     }
@@ -78,7 +75,7 @@ impl Editor {
                     | KeyCode::Home,
                     _,
                 ) => {
-                    self.move_cursor(code);
+                    self.view.move_cursor(code);
                 }
                 (KeyCode::Char(_), _) => {
                     self.view.needs_redraw = true;
@@ -99,57 +96,29 @@ impl Editor {
 
     fn refresh_screen(&mut self) -> Result<(), Error> {
         Terminal::hide_cursor()?;
-        Terminal::move_cursor_to(Position::default())?;
+        Terminal::move_cursor_to(self.view.screen_offset)?;
+        Terminal::clear_screen()?;
         if self.should_quit {
-            Terminal::clear_screen()?;
+            //Terminal::clear_screen()?;
             Terminal::print("Goodbye.\r\n")?;
         } else if self.view.needs_redraw {
             self.view.render();
         }
         Terminal::move_cursor_to(Position {
-            x: self.cursor_position.x,
-            y: self.cursor_position.y,
+            width: self
+                .view
+                .cursor_position
+                .width
+                .saturating_sub(self.view.screen_offset.width),
+            height: self
+                .view
+                .cursor_position
+                .height
+                .saturating_sub(self.view.screen_offset.height),
         })?;
         Terminal::show_cursor()?;
         Terminal::execute()?;
         Ok(())
-    }
-
-    fn move_cursor(&mut self, key_code: KeyCode) {
-        let Size { height, width } = Terminal::size().unwrap_or_default();
-        match key_code {
-            KeyCode::Down => {
-                self.cursor_position.y = min(
-                    self.cursor_position.y.saturating_add(1),
-                    width.saturating_sub(1),
-                );
-            }
-            KeyCode::Up => {
-                self.cursor_position.y = max(self.cursor_position.y.saturating_sub(1), 0);
-            }
-            KeyCode::Left => {
-                self.cursor_position.x = max(self.cursor_position.x.saturating_sub(1), 0);
-            }
-            KeyCode::Right => {
-                self.cursor_position.x = min(
-                    self.cursor_position.x.saturating_add(1),
-                    height.saturating_sub(1),
-                );
-            }
-            KeyCode::PageDown => {
-                self.cursor_position.y = height;
-            }
-            KeyCode::PageUp => {
-                self.cursor_position.y = 0;
-            }
-            KeyCode::End => {
-                self.cursor_position.x = 0;
-            }
-            KeyCode::Home => {
-                self.cursor_position.x = width;
-            }
-            _ => {}
-        }
     }
 }
 

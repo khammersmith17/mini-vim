@@ -15,8 +15,8 @@ pub struct Size {
 
 #[derive(Copy, Clone, Default)]
 pub struct Position {
-    pub x: usize,
-    pub y: usize,
+    pub width: usize,
+    pub height: usize,
 }
 
 #[derive(Copy, Clone, Default)]
@@ -55,7 +55,7 @@ impl Terminal {
     }
     pub fn move_cursor_to(position: Position) -> Result<(), Error> {
         #[allow(clippy::as_conversions, clippy::cast_possible_truncation)]
-        Self::queue_command(MoveTo(position.x as u16, position.y as u16))?;
+        Self::queue_command(MoveTo(position.width as u16, position.height as u16))?;
         Ok(())
     }
 
@@ -71,7 +71,10 @@ impl Terminal {
     }
 
     pub fn print_line(row: usize, line: &str) -> Result<(), Error> {
-        Terminal::move_cursor_to(Position { x: 0, y: row })?;
+        Terminal::move_cursor_to(Position {
+            width: 0,
+            height: row,
+        })?;
         Terminal::clear_line()?;
         Terminal::print(line)?;
         Ok(())
