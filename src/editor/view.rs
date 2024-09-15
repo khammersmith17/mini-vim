@@ -7,14 +7,6 @@ use std::cmp::max;
 const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
 const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/*
-#[derive(Default)]
-pub struct ScreenOffset {
-    height: usize,
-    width: usize,
-}
-*/
-
 pub struct View {
     pub buffer: Buffer,
     pub needs_redraw: bool,
@@ -45,34 +37,33 @@ impl View {
         for current_row in self.screen_offset.height..self.screen_offset.height + self.size.height {
             let relative_row = current_row - self.screen_offset.height;
             if let Some(line) = self.buffer.text.get(current_row) {
-                let print_line = if line.len() > self.size.width + self.screen_offset.width {
-                    self.truncate_line(line)
-                } else {
-                    line[self.screen_offset.width..].to_string()
-                };
-                Self::render_line(current_row, &print_line);
+                self.render_line(relative_row, &line);
             } else if self.buffer.is_empty() && current_row == welcome_row {
-                Self::render_line(
-                    relative_row,
-                    &self.get_welcome_message()[self.screen_offset.width..],
-                );
+                self.render_line(relative_row, &self.get_welcome_message());
             } else {
-                Self::render_line(relative_row, "~");
+                self.render_line(relative_row, "~");
             }
         }
 
         self.needs_redraw = false;
     }
 
-    fn render_line(row: usize, line: &str) {
-        let result = Terminal::print_line(row, line);
+    fn render_line(&self, row: usize, line: &str) {
+        let screen_text = if line.len() < self.screen_offset.width {
+            ""
+        } else if line.len() < self.screen_offset.width + self.size.width {
+            &line[self.screen_offset.width..]
+        } else {
+            &line[self.screen_offset.width..(self.screen_offset.width + self.size.width)]
+        };
+        let result = Terminal::print_line(row, screen_text);
         debug_assert!(result.is_ok(), "Failed to render line");
     }
-
-    fn truncate_line(&self, line: &str) -> String {
-        line[self.screen_offset.width..self.size.width + self.screen_offset.width].to_string()
-    }
-
+    /*
+        fn truncate_line(&self, line: &str) -> String {
+            line[self.screen_offset.width..self.size.width + self.screen_offset.width].to_string()
+        }
+    */
     pub fn resize(&mut self, size: Size) {
         self.size = size;
         let Size { height, width } = size;
