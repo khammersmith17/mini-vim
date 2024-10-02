@@ -55,20 +55,13 @@ impl View {
     }
 
     fn render_line(&self, row: usize, line: &str) {
-        /*let screen_text = if line.len() < self.screen_offset.width {
-            ""
-        } else if line.len() < self.screen_offset.width + self.size.width {
-            &line[self.screen_offset.width..]
-        } else {
-            &line[self.screen_offset.width..(self.screen_offset.width + self.size.width)]
-        };*/
         let result = Terminal::print_line(row, line);
         debug_assert!(result.is_ok(), "Failed to render line");
     }
     pub fn resize(&mut self, size: Size) {
         self.size = size;
         let Size { height, width } = size;
-        self.update_offset(height, width);
+        self.handle_offset_screen_snap(height, width);
     }
 
     pub fn load(&mut self, filename: &str) {
@@ -101,38 +94,123 @@ impl View {
     }
 
     pub fn move_cursor(&mut self, key_code: Direction) {
-        let Size { height, width } = Terminal::size().unwrap_or_default();
-        match key_code {
-            Direction::Down => {
-                self.cursor_position.height = self.cursor_position.height.saturating_add(1);
+        if !self.buffer.is_empty() {
+            let mut snap = false;
+            let Size { height, width } = Terminal::size().unwrap();
+            match key_code {
+                //if not on last line, move down
+                //if the next line is shorter, snap to the end of that line
+                Direction::Down => {
+                    self.cursor_position.height = min(
+                        self.cursor_position.height.saturating_add(1),
+                        self.buffer.text.len().saturating_sub(1),
+                    );
+                    self.cursor_position.width = min(
+                        self.cursor_position.width,
+                        self.buffer
+                            .text
+                            .get(self.cursor_position.height)
+                            .expect("Out of bounds error")
+                            .grapheme_len(),
+                    );
+                }
+                //if we are not in row 0, move up
+                //if the line above is shorter than the previous line, snap to the end
+                Direction::Up => {
+                    self.cursor_position.height =
+                        max(self.cursor_position.height.saturating_sub(1), 0);
+                    self.cursor_position.width = min(
+                        self.cursor_position.width,
+                        self.buffer
+                            .text
+                            .get(self.cursor_position.height)
+                            .expect("Out of bounds error")
+                            .grapheme_len(),
+                    );
+                }
+                //move left
+                //if we are at 0,0 no action
+                //if we are at width 0, snap to the right end of the previous line
+                //else move left 1
+                Direction::Left => {
+                    if self.cursor_position.width == 0 && self.cursor_position.height > 0 {
+                        self.cursor_position.height =
+                            max(self.cursor_position.height.saturating_sub(1), 0);
+                        self.cursor_position.width = self
+                            .buffer
+                            .text
+                            .get(self.cursor_position.height)
+                            .expect("Out of bounds error")
+                            .grapheme_len();
+                        snap = true;
+                    } else {
+                        self.cursor_position.width = self.cursor_position.width.saturating_sub(1);
+                    }
+                }
+                //if we are on the last line at the -1 position of the text, do nothing
+                //if we are at the end of the line, snap to position 0 on the next line
+                //else move right 1 char
+                Direction::Right => {
+                    let grapheme_len = self
+                        .buffer
+                        .text
+                        .get(self.cursor_position.height)
+                        .expect("Out of bounds error")
+                        .grapheme_len();
+
+                    let text_height = self.buffer.text.len().saturating_sub(1);
+
+                    if self.cursor_position.width == grapheme_len
+                        && self.cursor_position.height < text_height
+                    {
+                        self.cursor_position.height = self.cursor_position.height.saturating_add(1);
+                        self.cursor_position.width = 0;
+                        snap = true;
+                    } else {
+                        self.cursor_position.width =
+                            min(self.cursor_position.width.saturating_add(1), grapheme_len);
+                    }
+                }
+                //move to last line, cursor width will stay the same
+                Direction::PageDown => {
+                    self.cursor_position.height = self.buffer.text.len().saturating_sub(1);
+                    snap = true;
+                }
+                //move to the first line, cursor width stays the same
+                Direction::PageUp => {
+                    self.cursor_position.height = 0;
+                    snap = true;
+                }
+                //move to end of current line
+                Direction::End => {
+                    self.cursor_position.width = self
+                        .buffer
+                        .text
+                        .get(self.cursor_position.height)
+                        .expect("index Error")
+                        .grapheme_len();
+                    snap = true;
+                }
+                //move to start of current line
+                Direction::Home => {
+                    self.cursor_position.width = 0;
+                    snap = true;
+                }
             }
-            Direction::Up => {
-                self.cursor_position.height = max(self.cursor_position.height.saturating_sub(1), 0);
+            if snap {
+                self.handle_offset_screen_snap(height, width);
+            } else {
+                self.update_offset_single_move(height, width);
             }
-            Direction::Left => {
-                self.cursor_position.width = max(self.cursor_position.width.saturating_sub(1), 0);
-            }
-            Direction::Right => {
-                self.cursor_position.width = self.cursor_position.width.saturating_add(1);
-            }
-            Direction::PageDown => {
-                self.cursor_position.height = height + self.screen_offset.height;
-            }
-            Direction::PageUp => {
-                self.cursor_position.height = 0;
-            }
-            Direction::End => {
-                self.cursor_position.width = 0;
-            }
-            Direction::Home => {
-                self.cursor_position.width = self.cursor_position.width + self.screen_offset.width;
-            }
+        } else {
+            self.cursor_position.width = 0;
+            self.cursor_position.height = 0;
         }
-        self.update_offset(height, width);
         self.needs_redraw = true;
     }
 
     pub fn handle_event(&mut self, command: EditorCommand) {
+        //match the event to the enum value and handle the event accrodingly
         match command {
             EditorCommand::Move(direction) => self.move_cursor(direction),
             EditorCommand::Resize(size) => {
@@ -143,17 +221,60 @@ impl View {
         }
     }
 
-    fn update_offset(&mut self, height: usize, width: usize) {
-        if self.cursor_position.height > height + self.screen_offset.height {
-            self.screen_offset.height = self.screen_offset.height.saturating_add(1);
+    fn handle_offset_screen_snap(&mut self, height: usize, width: usize) {
+        if self.cursor_position.height >= height + self.screen_offset.height {
+            self.screen_offset.height = min(
+                self.buffer
+                    .text
+                    .len()
+                    .saturating_sub(height)
+                    .saturating_add(1),
+                self.cursor_position
+                    .height
+                    .saturating_sub(height)
+                    .saturating_add(1),
+            );
         }
-        if self.cursor_position.height < self.screen_offset.height {
+
+        if self.cursor_position.height == 0 {
+            self.screen_offset.height = 0;
+        }
+
+        if self.cursor_position.width == 0 {
+            self.screen_offset.width = 0;
+        }
+
+        if self.cursor_position.width >= width + self.screen_offset.width {
+            self.screen_offset.width = self
+                .cursor_position
+                .width
+                .saturating_sub(width)
+                .saturating_add(1);
+        }
+    }
+    fn update_offset_single_move(&mut self, height: usize, width: usize) {
+        //if cursor moves beyond height + offset -> increment height
+        if self.cursor_position.height >= height + self.screen_offset.height {
+            self.screen_offset.height = min(
+                self.screen_offset.height.saturating_add(1),
+                self.cursor_position
+                    .height
+                    .saturating_sub(height)
+                    .saturating_add(1),
+            );
+        }
+        // if height moves less than the offset -> decrement height
+        if self.cursor_position.height <= self.screen_offset.height {
             self.screen_offset.height = self.cursor_position.height;
         }
+        //if widith less than offset -> decerement width
         if self.cursor_position.width < self.screen_offset.width {
             self.screen_offset.width = self.cursor_position.width;
         }
-        if self.cursor_position.width > width + self.screen_offset.width {
+        // if new position is greater than offset, offset gets current_width - screen width
+        // this better handles snapping the cursor to the end of the line
+        if self.cursor_position.width >= width + self.screen_offset.width {
+            //self.screen_offset.width = self.screen_offset.width.saturating_sub(1);
             self.screen_offset.width = self.screen_offset.width.saturating_add(1);
         }
     }
