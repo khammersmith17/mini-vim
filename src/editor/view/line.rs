@@ -1,8 +1,10 @@
+use std::convert::TryFrom;
+use std::fmt;
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Debug)]
 pub enum GraphemeWidth {
     Half,
     Full,
@@ -17,12 +19,65 @@ impl GraphemeWidth {
     }
 }
 
+#[derive(Debug, Clone)]
 pub struct TextFragment {
     grapheme: String,
-    render_width: GraphemeWidth,
+    pub render_width: GraphemeWidth,
     replacement_text: Option<char>,
 }
 
+#[derive(Debug, Clone)]
+struct TextFragmentError;
+
+impl fmt::Display for TextFragmentError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "Error using TextFragment")
+    }
+}
+
+impl TryFrom<&str> for TextFragment {
+    type Error = String;
+    fn try_from(new_item: &str) -> Result<Self, Self::Error> {
+        let width = new_item.width();
+        let fragment_width = match width {
+            0 | 1 => GraphemeWidth::Half,
+            _ => GraphemeWidth::Full,
+        };
+
+        let replacement = match width {
+            0 => {
+                let trimmed = new_item.trim();
+                match trimmed {
+                    "\t" => Some(' '),
+                    _ => {
+                        let control = trimmed
+                            .chars()
+                            .map(|char| char.is_control())
+                            .reduce(|a, b| a | b)
+                            .expect("Error in reduction");
+                        let replace_val = if control {
+                            '|'
+                        } else if trimmed.is_empty() {
+                            '*'
+                        } else {
+                            '.'
+                        };
+                        Some(replace_val)
+                    }
+                }
+            }
+            _ => None,
+        };
+
+        Ok(Self {
+            grapheme: new_item.to_string(),
+            render_width: fragment_width,
+            replacement_text: replacement,
+        })
+    }
+}
+
+#[derive(Clone)]
 pub struct Line {
     pub string: Vec<TextFragment>,
 }
@@ -117,5 +172,13 @@ impl Line {
         }
 
         result_string
+    }
+
+    pub fn is_empty(&self) -> bool {
+        if self.string.len() == 0 {
+            return true;
+        } else {
+            return false;
+        }
     }
 }

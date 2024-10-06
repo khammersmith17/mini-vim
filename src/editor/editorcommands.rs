@@ -15,7 +15,11 @@ pub enum Direction {
 
 pub enum EditorCommand {
     Move(Direction),
+    Insert(char),
     Resize(Size),
+    NewLine,
+    Delete,
+    None,
     Quit,
 }
 
@@ -35,7 +39,10 @@ impl TryFrom<Event> for EditorCommand {
                 (KeyCode::Char('u'), KeyModifiers::CONTROL) => Ok(Self::Move(Direction::PageUp)),
                 (KeyCode::Char('d'), KeyModifiers::CONTROL) => Ok(Self::Move(Direction::PageDown)),
                 (KeyCode::Char('e'), KeyModifiers::CONTROL) => Ok(Self::Move(Direction::End)),
-                _ => Err(format!("Keycode not supported {code:?}")),
+                (KeyCode::Char(char), _) => Ok(Self::Insert(char)),
+                (KeyCode::Backspace, _) => Ok(Self::Delete),
+                (KeyCode::Enter, _) => Ok(Self::NewLine),
+                _ => Ok(Self::None),
             },
             Event::Resize(width_16, height_u16) => {
                 #[allow(clippy::as_conversions)]

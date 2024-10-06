@@ -209,16 +209,101 @@ impl View {
         self.needs_redraw = true;
     }
 
+    fn insert_char(&mut self, insert_char: char) {
+        let new_char_width = self.buffer.update_line_insert(
+            self.cursor_position.height,
+            self.cursor_position.width,
+            insert_char,
+        );
+
+        self.cursor_position.width = self.cursor_position.width.saturating_add(new_char_width);
+    }
+
+    fn delete_char(&mut self) {
+        //get the width of the char being deleted to update the cursor position
+        let removed_char_width = self
+            .buffer
+            .update_line_delete(self.cursor_position.height, self.cursor_position.width);
+
+        self.cursor_position.width = self
+            .cursor_position
+            .width
+            .saturating_sub(removed_char_width);
+    }
+
     pub fn handle_event(&mut self, command: EditorCommand) {
         //match the event to the enum value and handle the event accrodingly
+        let Size { height, width } = Terminal::size().expect("Error getting size");
         match command {
             EditorCommand::Move(direction) => self.move_cursor(direction),
             EditorCommand::Resize(size) => {
-                self.needs_redraw = true;
                 self.resize(size);
             }
-            EditorCommand::Quit => {}
+            EditorCommand::Insert(char) => {
+                self.insert_char(char);
+                self.update_offset_single_move(height, width);
+            }
+            EditorCommand::Delete => {
+                //todo add logic for when a line is empty
+                match self.cursor_position.width {
+                    0 => {
+                        if self.cursor_position.height == 0 {
+                        } else if self
+                            .buffer
+                            .text
+                            .get(self.cursor_position.height)
+                            .expect("Out of bounds error")
+                            .is_empty()
+                        {
+                            self.buffer.text.remove(self.cursor_position.height);
+                            self.cursor_position.height =
+                                self.cursor_position.height.saturating_sub(1);
+                            self.cursor_position.width = self
+                                .buffer
+                                .text
+                                .get(self.cursor_position.height)
+                                .expect("Out of bounds error")
+                                .grapheme_len();
+                            self.handle_offset_screen_snap(height, width);
+                        } else {
+                            let new_width = self
+                                .buffer
+                                .text
+                                .get(self.cursor_position.height.saturating_sub(1))
+                                .expect("Out of bounds error")
+                                .grapheme_len();
+                            self.buffer.join_line(self.cursor_position.height);
+                            self.cursor_position.height =
+                                self.cursor_position.height.saturating_sub(1);
+                            self.cursor_position.width = new_width;
+                        }
+                    }
+                    _ => {
+                        self.delete_char();
+                    }
+                };
+            }
+            EditorCommand::NewLine => {
+                let grapheme_len = self
+                    .buffer
+                    .text
+                    .get(self.cursor_position.height)
+                    .expect("Out of bounds error")
+                    .grapheme_len();
+                if self.cursor_position.width == grapheme_len {
+                    self.buffer.new_line(self.cursor_position.height);
+                } else {
+                    self.buffer
+                        .split_line(self.cursor_position.height, self.cursor_position.width);
+                }
+
+                self.cursor_position.height = self.cursor_position.height.saturating_add(1);
+                self.cursor_position.width = 0;
+                self.handle_offset_screen_snap(height, width);
+            }
+            _ => {}
         }
+        self.needs_redraw = true;
     }
 
     fn handle_offset_screen_snap(&mut self, height: usize, width: usize) {
