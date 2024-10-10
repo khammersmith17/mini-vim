@@ -1,4 +1,5 @@
 use super::terminal::{Position, Size, Terminal};
+use crossterm::event::{read, Event, KeyCode, KeyEvent};
 mod buffer;
 use super::editorcommands::{Direction, EditorCommand};
 use buffer::Buffer;
@@ -231,6 +232,70 @@ impl View {
             .saturating_sub(removed_char_width);
     }
 
+    pub fn get_file_name(&mut self) {
+        //clear the screen
+        //move the cursor to 0,0
+        //start a repl loop
+        //grab test user inputs to be file name
+        //when the user presses enter
+        let mut filename_buffer = Vec::new();
+        loop {
+            Terminal::hide_cursor().expect("Error hiding cursor");
+            Terminal::move_cursor_to(Position {
+                height: 0,
+                width: 0,
+            })
+            .expect("Error moving cursor to start");
+            Terminal::clear_screen().expect("Error clearing screen");
+
+            let current_filename: String = filename_buffer.iter().collect();
+            let to_render = format!("Filename: {}", &current_filename);
+            let new_position = to_render.len();
+
+            match read() {
+                Ok(event) => {
+                    match event {
+                        Event::Key(KeyEvent { code, .. }) => match code {
+                            KeyCode::Char(letter) => {
+                                filename_buffer.push(letter);
+                            }
+                            KeyCode::Backspace => {
+                                filename_buffer.pop();
+                            }
+                            KeyCode::Enter => break,
+                            _ => {
+                                //skipping all other keycode events
+                            }
+                        },
+                        _ => {
+                            //skipping all other events
+                        }
+                    }
+                }
+
+                Err(err) => {
+                    #[cfg(debug_assertions)]
+                    {
+                        panic!("Could not handle event: {err}");
+                    }
+                }
+            }
+
+            self.render_line(0, &to_render);
+            Terminal::move_cursor_to(Position {
+                height: 0,
+                width: new_position,
+            })
+            .expect("Error moving cursor");
+            Terminal::show_cursor().expect("Error showing cursor");
+            Terminal::execute().expect("Error flushing std buffer");
+        }
+        let filename: String = filename_buffer.iter().collect();
+
+        self.buffer.assume_file_name(filename);
+        self.needs_redraw = true;
+    }
+
     pub fn handle_event(&mut self, command: EditorCommand) {
         //match the event to the enum value and handle the event accrodingly
         let Size { height, width } = Terminal::size().expect("Error getting size");
@@ -238,6 +303,12 @@ impl View {
             EditorCommand::Move(direction) => self.move_cursor(direction),
             EditorCommand::Resize(size) => {
                 self.resize(size);
+            }
+            EditorCommand::Save => {
+                if self.buffer.filename.is_none() {
+                    self.get_file_name();
+                }
+                self.buffer.save();
             }
             EditorCommand::Insert(char) => {
                 self.insert_char(char);

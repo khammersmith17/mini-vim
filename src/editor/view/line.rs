@@ -83,6 +83,17 @@ pub struct Line {
 }
 
 impl Line {
+    pub fn to_string(&self) -> String {
+        let mut return_string = String::new();
+
+        for fragment in self.string.iter() {
+            match fragment.replacement_text {
+                Some(char) => return_string.push(char),
+                None => return_string.push_str(&fragment.grapheme),
+            };
+        }
+        return_string
+    }
     pub fn grapheme_len(&self) -> usize {
         if self.string.len() == 0 {
             return 0;

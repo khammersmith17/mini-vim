@@ -66,6 +66,12 @@ impl Editor {
             match EditorCommand::try_from(event) {
                 Ok(command) => {
                     if matches!(command, EditorCommand::Quit) {
+                        if !self.view.buffer.is_saved {
+                            if self.view.buffer.filename.is_none() {
+                                self.view.get_file_name();
+                            }
+                            self.view.buffer.save();
+                        }
                         self.should_quit = true;
                     } else {
                         self.view.handle_event(command)
@@ -91,7 +97,6 @@ impl Editor {
         Terminal::move_cursor_to(self.view.screen_offset)?;
         Terminal::clear_screen()?;
         if self.should_quit {
-            //Terminal::clear_screen()?;
             Terminal::print("Goodbye.\r\n")?;
         } else if self.view.needs_redraw {
             self.view.render();
