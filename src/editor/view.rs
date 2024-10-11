@@ -238,7 +238,8 @@ impl View {
         //start a repl loop
         //grab test user inputs to be file name
         //when the user presses enter
-        let mut filename_buffer = Vec::new();
+        let mut filename_buffer = String::new();
+        let mut curr_position: usize = 10;
         loop {
             Terminal::hide_cursor().expect("Error hiding cursor");
             Terminal::move_cursor_to(Position {
@@ -248,19 +249,17 @@ impl View {
             .expect("Error moving cursor to start");
             Terminal::clear_screen().expect("Error clearing screen");
 
-            let current_filename: String = filename_buffer.iter().collect();
-            let to_render = format!("Filename: {}", &current_filename);
-            let new_position = to_render.len();
-
             match read() {
                 Ok(event) => {
                     match event {
                         Event::Key(KeyEvent { code, .. }) => match code {
                             KeyCode::Char(letter) => {
                                 filename_buffer.push(letter);
+                                curr_position += 1;
                             }
                             KeyCode::Backspace => {
                                 filename_buffer.pop();
+                                curr_position = std::cmp::max(10, curr_position.saturating_sub(1));
                             }
                             KeyCode::Enter => break,
                             _ => {
@@ -281,18 +280,17 @@ impl View {
                 }
             }
 
-            self.render_line(0, &to_render);
+            self.render_line(0, &format!("Filename: {}", &filename_buffer));
             Terminal::move_cursor_to(Position {
                 height: 0,
-                width: new_position,
+                width: curr_position,
             })
             .expect("Error moving cursor");
             Terminal::show_cursor().expect("Error showing cursor");
             Terminal::execute().expect("Error flushing std buffer");
         }
-        let filename: String = filename_buffer.iter().collect();
 
-        self.buffer.assume_file_name(filename);
+        self.buffer.assume_file_name(filename_buffer);
         self.needs_redraw = true;
     }
 
