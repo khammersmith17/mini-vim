@@ -55,7 +55,7 @@ impl View {
         self.needs_redraw = false;
     }
 
-    fn render_line(&self, row: usize, line: &str) {
+    pub fn render_line(&self, row: usize, line: &str) {
         let result = Terminal::print_line(row, line);
         debug_assert!(result.is_ok(), "Failed to render line");
     }
@@ -218,6 +218,7 @@ impl View {
         );
 
         self.cursor_position.width = self.cursor_position.width.saturating_add(new_char_width);
+        self.buffer.is_saved = false;
     }
 
     fn delete_char(&mut self) {
@@ -233,22 +234,11 @@ impl View {
     }
 
     pub fn get_file_name(&mut self) {
-        //clear the screen
-        //move the cursor to 0,0
-        //start a repl loop
-        //grab test user inputs to be file name
-        //when the user presses enter
+        // clear_screen and render screen to get file name
         let mut filename_buffer = String::new();
         let mut curr_position: usize = 10;
+        self.render_filename_screen(&filename_buffer, curr_position);
         loop {
-            Terminal::hide_cursor().expect("Error hiding cursor");
-            Terminal::move_cursor_to(Position {
-                height: 0,
-                width: 0,
-            })
-            .expect("Error moving cursor to start");
-            Terminal::clear_screen().expect("Error clearing screen");
-
             match read() {
                 Ok(event) => {
                     match event {
@@ -279,19 +269,29 @@ impl View {
                     }
                 }
             }
-
-            self.render_line(0, &format!("Filename: {}", &filename_buffer));
-            Terminal::move_cursor_to(Position {
-                height: 0,
-                width: curr_position,
-            })
-            .expect("Error moving cursor");
-            Terminal::show_cursor().expect("Error showing cursor");
-            Terminal::execute().expect("Error flushing std buffer");
+            self.render_filename_screen(&filename_buffer, curr_position);
         }
 
         self.buffer.assume_file_name(filename_buffer);
         self.needs_redraw = true;
+    }
+
+    fn render_filename_screen(&self, curr_filename: &str, curr_position: usize) {
+        Terminal::hide_cursor().expect("Error hiding cursor");
+        Terminal::move_cursor_to(Position {
+            height: 0,
+            width: 0,
+        })
+        .expect("Error moving cursor to start");
+        Terminal::clear_screen().expect("Error clearing screen");
+        self.render_line(0, &format!("Filename: {}", &curr_filename));
+        Terminal::move_cursor_to(Position {
+            height: 0,
+            width: curr_position,
+        })
+        .expect("Error moving cursor");
+        Terminal::show_cursor().expect("Error showing cursor");
+        Terminal::execute().expect("Error flushing std buffer");
     }
 
     pub fn handle_event(&mut self, command: EditorCommand) {

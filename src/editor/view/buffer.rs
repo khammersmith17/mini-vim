@@ -1,7 +1,7 @@
 use super::line::{GraphemeWidth, Line, TextFragment};
 use std::fs::{read_to_string, OpenOptions};
 use std::io::prelude::*;
-use std::io::Error;
+use std::io::{Error, LineWriter};
 
 #[derive(Default)]
 pub struct Buffer {
@@ -39,15 +39,17 @@ impl Buffer {
             Some(name) => name,
             None => panic!("Trying to save without filename being set"),
         };
-        let mut file = OpenOptions::new()
+        let file = OpenOptions::new()
             .write(true)
             .create(true)
             .open(filename)
             .expect("Error opening file");
+        let mut file = LineWriter::new(file);
         for line in self.text.iter() {
             let text_line = line.to_string();
             file.write_all(text_line.as_bytes())
                 .expect("Error on write");
+            file.write_all(b"\n").expect("Error entering new line");
         }
         self.is_saved = true;
     }

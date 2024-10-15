@@ -1,4 +1,4 @@
-use crossterm::event::{read, Event, KeyEvent, KeyEventKind};
+use crossterm::event::{read, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 mod terminal;
 use std::env::args;
 use std::io::Error;
@@ -67,10 +67,21 @@ impl Editor {
                 Ok(command) => {
                     if matches!(command, EditorCommand::Quit) {
                         if !self.view.buffer.is_saved {
-                            if self.view.buffer.filename.is_none() {
-                                self.view.get_file_name();
+                            if !self.view.buffer.is_empty() {
+                                let exit = self.exit_without_saving();
+                                match exit {
+                                    false => {
+                                        if self.view.buffer.filename.is_none() {
+                                            self.view.get_file_name();
+                                        }
+                                        self.view.buffer.save();
+                                    }
+                                    true => {
+                                        Terminal::clear_screen().expect("Error clearing screen");
+                                        self.view.render_line(0, "Exiting without saving...");
+                                    }
+                                }
                             }
-                            self.view.buffer.save();
                         }
                         self.should_quit = true;
                     } else {
@@ -90,6 +101,45 @@ impl Editor {
                 panic!("Unsupported event")
             }
         }
+    }
+
+    fn exit_without_saving(&self) -> bool {
+        let mut result: bool = false;
+        Terminal::clear_screen().expect("Error clearing screen");
+        Terminal::hide_cursor().expect("Error hiding cursor");
+        self.view
+            .render_line(0, "Leave without saving(ctrl + y/ctrl + n)");
+        Terminal::execute().expect("Error flushing std buffer");
+        loop {
+            match read() {
+                Ok(event) => match event {
+                    Event::Key(KeyEvent {
+                        code, modifiers, ..
+                    }) => match (code, modifiers) {
+                        (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
+                            result = true;
+                            break;
+                        }
+                        (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
+                            break;
+                        }
+                        _ => {
+                            // not reading other key presses
+                        }
+                    },
+                    _ => {
+                        // doing nothing for other events
+                    }
+                },
+                Err(err) => {
+                    #[cfg(debug_assertions)]
+                    {
+                        panic!("Could not handle event {err}");
+                    }
+                }
+            }
+        }
+        result
     }
 
     fn refresh_screen(&mut self) -> Result<(), Error> {
