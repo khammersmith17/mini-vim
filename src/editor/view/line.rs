@@ -1,5 +1,6 @@
 use std::convert::TryFrom;
 use std::fmt;
+//use std::fmt::Display;
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
@@ -20,19 +21,19 @@ impl GraphemeWidth {
 }
 
 #[derive(Debug, Clone)]
-pub struct TextFragment {
-    grapheme: String,
-    pub render_width: GraphemeWidth,
-    replacement_text: Option<char>,
-}
-
-#[derive(Debug, Clone)]
 struct TextFragmentError;
 
 impl fmt::Display for TextFragmentError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "Error using TextFragment")
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct TextFragment {
+    pub grapheme: String,
+    pub render_width: GraphemeWidth,
+    replacement_text: Option<char>,
 }
 
 impl TryFrom<&str> for TextFragment {

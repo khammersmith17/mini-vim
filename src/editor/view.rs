@@ -35,7 +35,9 @@ impl View {
             return;
         }
         #[allow(clippy::integer_division)]
-        for current_row in self.screen_offset.height..self.screen_offset.height + self.size.height {
+        for current_row in
+            self.screen_offset.height..self.screen_offset.height + self.size.height - 1
+        {
             let relative_row = current_row - self.screen_offset.height;
             if let Some(line) = self.buffer.text.get(current_row) {
                 self.render_line(
@@ -51,8 +53,30 @@ impl View {
                 self.render_line(relative_row, "~");
             }
         }
+        self.render_file_info(
+            self.cursor_position.height - self.screen_offset.height + self.size.height,
+        );
 
         self.needs_redraw = false;
+    }
+
+    fn render_file_info(&self, height: usize) {
+        let saved = if !self.buffer.is_saved {
+            "not saved"
+        } else {
+            "saved"
+        };
+        let filename = match &self.buffer.filename {
+            Some(file) => file,
+            None => "Unnamed",
+        };
+        let current_line = self.cursor_position.height.saturating_add(1);
+
+        let render_message = format!(
+            "Filename: {} | Status: {} | Line: {}",
+            filename, saved, current_line
+        );
+        self.render_line(height.saturating_sub(1), &render_message);
     }
 
     pub fn render_line(&self, row: usize, line: &str) {
@@ -221,6 +245,12 @@ impl View {
         self.buffer.is_saved = false;
     }
 
+    fn insert_tab(&mut self) {
+        self.buffer
+            .insert_tab(self.cursor_position.height, self.cursor_position.width);
+        self.cursor_position.width = self.cursor_position.width.saturating_add(4);
+    }
+
     fn delete_char(&mut self) {
         //get the width of the char being deleted to update the cursor position
         let removed_char_width = self
@@ -312,6 +342,7 @@ impl View {
                 self.insert_char(char);
                 self.update_offset_single_move(height, width);
             }
+            EditorCommand::Tab => self.insert_tab(),
             EditorCommand::Delete => {
                 //todo add logic for when a line is empty
                 match self.cursor_position.width {

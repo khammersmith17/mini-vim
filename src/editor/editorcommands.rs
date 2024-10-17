@@ -17,6 +17,7 @@ pub enum EditorCommand {
     Move(Direction),
     Insert(char),
     Resize(Size),
+    Tab,
     NewLine,
     Save,
     Delete,
@@ -44,6 +45,7 @@ impl TryFrom<Event> for EditorCommand {
                 (KeyCode::Char(char), _) => Ok(Self::Insert(char)),
                 (KeyCode::Backspace, _) => Ok(Self::Delete),
                 (KeyCode::Enter, _) => Ok(Self::NewLine),
+                (KeyCode::Tab, _) => Ok(Self::Tab),
                 _ => Ok(Self::None),
             },
             Event::Resize(width_16, height_u16) => {
