@@ -4,7 +4,8 @@ mod buffer;
 use super::editorcommands::{Direction, EditorCommand};
 use buffer::Buffer;
 use std::cmp::{max, min};
-mod line;
+pub mod line;
+use line::Line;
 
 const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
 const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -42,15 +43,15 @@ impl View {
             if let Some(line) = self.buffer.text.get(current_row) {
                 self.render_line(
                     relative_row,
-                    &line.get(
+                    line.get_line_subset(
                         self.screen_offset.width
                             ..self.screen_offset.width.saturating_add(self.size.width),
                     ),
                 );
             } else if self.buffer.is_empty() && current_row == self.size.height / 3 {
-                self.render_line(relative_row, &self.get_welcome_message());
+                self.render_line_str(relative_row, &self.get_welcome_message());
             } else {
-                self.render_line(relative_row, "~");
+                self.render_line_str(relative_row, "~");
             }
         }
         self.render_file_info(
@@ -76,12 +77,17 @@ impl View {
             "Filename: {} | Status: {} | Line: {}",
             filename, saved, current_line
         );
-        self.render_line(height.saturating_sub(1), &render_message);
+        self.render_line_str(height.saturating_sub(1), &render_message);
     }
 
-    pub fn render_line(&self, row: usize, line: &str) {
+    pub fn render_line_str(&self, row: usize, line: &str) {
         let result = Terminal::print_line(row, line);
-        debug_assert!(result.is_ok(), "Failed to render line");
+        debug_assert!(result.is_ok(), "Failed to render line string");
+    }
+
+    fn render_line(&self, row: usize, line: Line) {
+        let result = Terminal::render_line(row, line);
+        debug_assert!(result.is_ok(), "Failed to render line")
     }
     pub fn resize(&mut self, size: Size) {
         self.size = size;
@@ -314,7 +320,7 @@ impl View {
         })
         .expect("Error moving cursor to start");
         Terminal::clear_screen().expect("Error clearing screen");
-        self.render_line(0, &format!("Filename: {}", &curr_filename));
+        self.render_line_str(0, &format!("Filename: {}", &curr_filename));
         Terminal::move_cursor_to(Position {
             height: 0,
             width: curr_position,

@@ -1,6 +1,5 @@
 use std::convert::TryFrom;
 use std::fmt;
-//use std::fmt::Display;
 use std::ops::Range;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
@@ -10,7 +9,7 @@ pub enum GraphemeWidth {
     Half,
     Full,
 }
-
+/*
 impl GraphemeWidth {
     fn saturating_add(&self, other: usize) -> usize {
         match self {
@@ -19,6 +18,7 @@ impl GraphemeWidth {
         }
     }
 }
+*/
 
 #[derive(Debug, Clone)]
 struct TextFragmentError;
@@ -81,6 +81,21 @@ impl TryFrom<&str> for TextFragment {
 #[derive(Clone)]
 pub struct Line {
     pub string: Vec<TextFragment>,
+}
+
+impl fmt::Display for Line {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        let result: String = self
+            .string
+            .iter()
+            .map(|fragment| match fragment.replacement_text {
+                Some(char) => char.to_string().clone(),
+                None => fragment.grapheme.clone(),
+            })
+            .collect();
+
+        write!(formatter, "{result}")
+    }
 }
 
 impl Line {
@@ -156,34 +171,47 @@ impl Line {
 
         Self { string: line }
     }
-
-    pub fn get(&self, range: Range<usize>) -> String {
-        if range.start >= range.end {
-            return String::new();
-        }
-
-        let mut result_string = String::new();
-        let mut current_position = 0;
-        for fragment in &self.string {
-            let end = fragment.render_width.saturating_add(current_position);
-            if current_position > range.end {
-                break;
+    /*
+        pub fn get(&self, range: Range<usize>) -> String {
+            if range.start >= range.end {
+                return String::new();
             }
 
-            if end > range.start {
-                if end > range.end || current_position < range.start {
-                    result_string.push('~');
-                } else if let Some(char) = fragment.replacement_text {
-                    result_string.push(char);
-                } else {
-                    result_string.push_str(&fragment.grapheme)
+            let mut result_string = String::new();
+            let mut current_position = 0;
+            for fragment in &self.string {
+                let end = fragment.render_width.saturating_add(current_position);
+                if current_position > range.end {
+                    break;
                 }
+
+                if end > range.start {
+                    if end > range.end || current_position < range.start {
+                        result_string.push('~');
+                    } else if let Some(char) = fragment.replacement_text {
+                        result_string.push(char);
+                    } else {
+                        result_string.push_str(&fragment.grapheme)
+                    }
+                }
+
+                current_position = end;
             }
 
-            current_position = end;
+            result_string
         }
+    */
 
-        result_string
+    pub fn get_line_subset(&self, range: Range<usize>) -> Line {
+        let end = std::cmp::min(range.end, self.string.len());
+        let new_line = self
+            .string
+            .get(range.start..end)
+            .expect("Out of bounds error");
+
+        return Line {
+            string: new_line.to_vec(),
+        };
     }
 
     pub fn is_empty(&self) -> bool {
