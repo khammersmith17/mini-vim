@@ -108,7 +108,7 @@ impl Editor {
         Terminal::clear_screen().expect("Error clearing screen");
         Terminal::hide_cursor().expect("Error hiding cursor");
         self.view
-            .render_line_str(0, "Leave without saving(ctrl + y/ctrl + n)");
+            .render_line_str(0, "Leave without saving: Ctrl-y = exit | Ctrl-n = save");
         Terminal::execute().expect("Error flushing std buffer");
         loop {
             match read() {

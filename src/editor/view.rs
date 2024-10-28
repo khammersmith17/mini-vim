@@ -1,5 +1,6 @@
 use super::terminal::{Position, Size, Terminal};
 use crossterm::event::{read, Event, KeyCode, KeyEvent};
+use std::time::Instant;
 mod buffer;
 use super::editorcommands::{Direction, EditorCommand};
 use buffer::Buffer;
@@ -10,12 +11,18 @@ use line::Line;
 const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
 const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+struct Help {
+    render_help: bool,
+    time_began: Instant,
+}
+
 pub struct View {
     pub buffer: Buffer,
     pub needs_redraw: bool,
     pub size: Size,
     pub cursor_position: Position,
     pub screen_offset: Position,
+    help_indicator: Help,
 }
 
 impl Default for View {
@@ -26,6 +33,10 @@ impl Default for View {
             size: Terminal::size().unwrap_or_default(),
             cursor_position: Position::default(),
             screen_offset: Position::default(),
+            help_indicator: Help {
+                render_help: false,
+                time_began: Instant::now(),
+            },
         }
     }
 }
@@ -35,9 +46,14 @@ impl View {
         if self.size.width == 0 || self.size.height == 0 {
             return;
         }
+        let screen_cut = if self.help_indicator.render_help {
+            2
+        } else {
+            1
+        };
         #[allow(clippy::integer_division)]
         for current_row in
-            self.screen_offset.height..self.screen_offset.height + self.size.height - 1
+            self.screen_offset.height..self.screen_offset.height + self.size.height - screen_cut
         {
             let relative_row = current_row - self.screen_offset.height;
             if let Some(line) = self.buffer.text.get(current_row) {
@@ -54,6 +70,9 @@ impl View {
                 self.render_line_str(relative_row, "~");
             }
         }
+        if self.help_indicator.render_help {
+            self.render_help_line(self.size.height, self.size.width);
+        }
         self.render_file_info(
             self.cursor_position.height - self.screen_offset.height + self.size.height,
         );
@@ -61,22 +80,51 @@ impl View {
         self.needs_redraw = false;
     }
 
-    fn render_file_info(&self, height: usize) {
+    fn render_help_line(&mut self, height: usize, width: usize) {
+        if self.help_indicator.render_help
+            && Instant::now()
+                .duration_since(self.help_indicator.time_began)
+                .as_secs()
+                < 5
+        {
+            let mut render_message = format!(
+                "HELP: {} | {} | {} | {} | {} | {}",
+                "Ctrl-w = save",
+                "Ctrl-q = quit",
+                "Ctrl-l = snap-left",
+                "Ctrl-r = snap-right",
+                "Ctrl-u = snap-up",
+                "Ctrl-d = snap-down"
+            );
+            render_message.truncate(width);
+            self.render_line_str(height.saturating_sub(2), &render_message);
+        } else {
+            self.help_indicator.render_help = false;
+        }
+    }
+
+    fn render_file_info(&mut self, height: usize) {
         let saved = if !self.buffer.is_saved {
-            "not saved"
+            "modified"
         } else {
             "saved"
         };
         let filename = match &self.buffer.filename {
             Some(file) => file,
-            None => "Unnamed",
+            None => "-",
         };
-        let current_line = self.cursor_position.height.saturating_add(1);
+        let render_message = if !self.buffer.is_empty() {
+            format!(
+                "Filename: {} | Status: {} | Line: {} / {}",
+                filename,
+                saved,
+                self.cursor_position.height.saturating_add(1),
+                self.buffer.text.len()
+            )
+        } else {
+            format!("Filename: {} | Status: {} | Line: -", filename, saved)
+        };
 
-        let render_message = format!(
-            "Filename: {} | Status: {} | Line: {}",
-            filename, saved, current_line
-        );
         self.render_line_str(height.saturating_sub(1), &render_message);
     }
 
@@ -406,6 +454,10 @@ impl View {
                 self.cursor_position.height = self.cursor_position.height.saturating_add(1);
                 self.cursor_position.width = 0;
                 self.handle_offset_screen_snap(height, width);
+            }
+            EditorCommand::Help => {
+                self.help_indicator.render_help = true;
+                self.help_indicator.time_began = Instant::now();
             }
             _ => {}
         }
