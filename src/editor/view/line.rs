@@ -81,6 +81,7 @@ impl TryFrom<&str> for TextFragment {
 #[derive(Clone)]
 pub struct Line {
     pub string: Vec<TextFragment>,
+    pub raw_string: String,
 }
 
 impl fmt::Display for Line {
@@ -110,6 +111,18 @@ impl Line {
         }
         return_string
     }
+
+    pub fn generate_raw_string(&mut self) {
+        self.raw_string = self
+            .string
+            .iter()
+            .map(|fragment| match fragment.replacement_text {
+                Some(char) => char.to_string().clone(),
+                None => fragment.grapheme.clone(),
+            })
+            .collect();
+    }
+
     pub fn grapheme_len(&self) -> usize {
         if self.string.len() == 0 {
             return 0;
@@ -169,7 +182,10 @@ impl Line {
             })
             .collect();
 
-        Self { string: line }
+        Self {
+            string: line,
+            raw_string: line_str.to_string(),
+        }
     }
     /*
         pub fn get(&self, range: Range<usize>) -> String {
@@ -211,6 +227,7 @@ impl Line {
 
         return Line {
             string: new_line.to_vec(),
+            raw_string: String::new(),
         };
     }
 

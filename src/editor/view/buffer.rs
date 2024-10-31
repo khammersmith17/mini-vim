@@ -28,6 +28,15 @@ impl Buffer {
             is_saved: true,
         })
     }
+    /*
+    pub fn search(&self, search_str: &str, indicies: &mut Vec<usize>) {
+        indicies.clear();
+
+        for (i, line) in self.text.iter().rev().enumerate() {
+            if line.raw_string
+        }
+
+    }*/
 
     pub fn assume_file_name(&mut self, filename: String) {
         self.filename = Some(filename);
@@ -56,7 +65,10 @@ impl Buffer {
 
     pub fn insert_tab(&mut self, line_index: usize, width_index: usize) {
         if self.is_empty() {
-            let new_line = Line { string: Vec::new() };
+            let new_line = Line {
+                string: Vec::new(),
+                raw_string: String::new(),
+            };
             self.text.push(new_line);
         }
 
@@ -67,6 +79,11 @@ impl Buffer {
                 .string
                 .push(TextFragment::try_from(" ").expect("Error generating new fragment"));
         }
+
+        self.text
+            .get_mut(line_index)
+            .expect("Out of bounds error")
+            .generate_raw_string();
     }
 
     pub fn update_line_insert(
@@ -95,6 +112,10 @@ impl Buffer {
         } else {
             self.text.push(Line::from(insert_char.to_string().as_str()));
         }
+        self.text
+            .get_mut(line_index)
+            .expect("Out of bounds error")
+            .generate_raw_string();
         self.is_saved = false;
         move_width
     }
@@ -118,6 +139,10 @@ impl Buffer {
             .expect("Out of bounds error")
             .string
             .remove(width_index.saturating_sub(1));
+        self.text
+            .get_mut(line_index)
+            .expect("Out of bounds error")
+            .generate_raw_string();
         self.is_saved = false;
         match removed_char.render_width {
             GraphemeWidth::Half => 1,
@@ -146,8 +171,13 @@ impl Buffer {
     }
 
     pub fn new_line(&mut self, line_index: usize) {
-        self.text
-            .insert(line_index.saturating_add(1), Line { string: Vec::new() });
+        self.text.insert(
+            line_index.saturating_add(1),
+            Line {
+                string: Vec::new(),
+                raw_string: String::new(),
+            },
+        );
         self.is_saved = false;
     }
 
@@ -163,6 +193,7 @@ impl Buffer {
             line_index.saturating_add(1),
             Line {
                 string: new_line.to_vec(),
+                raw_string: String::new(),
             },
         );
         self.text
@@ -170,6 +201,11 @@ impl Buffer {
             .expect("Out of bounds error")
             .string
             .truncate(width_index);
+
+        self.text
+            .get_mut(line_index.saturating_add(1))
+            .expect("Out of bounds error")
+            .generate_raw_string();
         self.is_saved = false;
     }
 
@@ -187,5 +223,10 @@ impl Buffer {
             .string
             .append(&mut current_line);
         self.is_saved = false;
+
+        self.text
+            .get_mut(line_index.saturating_sub(1))
+            .expect("Out of bounds error")
+            .generate_raw_string();
     }
 }
