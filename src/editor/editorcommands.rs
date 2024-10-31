@@ -35,10 +35,6 @@ impl TryFrom<Event> for EditorCommand {
                 code, modifiers, ..
             }) => match (code, modifiers) {
                 (KeyCode::Char('q'), KeyModifiers::CONTROL) => Ok(Self::Quit),
-                (KeyCode::Up, _) => Ok(Self::Move(Direction::Up)),
-                (KeyCode::Down, _) => Ok(Self::Move(Direction::Down)),
-                (KeyCode::Left, _) => Ok(Self::Move(Direction::Left)),
-                (KeyCode::Right, _) => Ok(Self::Move(Direction::Right)),
                 (KeyCode::Char('l'), KeyModifiers::CONTROL) => Ok(Self::Move(Direction::Home)),
                 (KeyCode::Char('u'), KeyModifiers::CONTROL) => Ok(Self::Move(Direction::PageUp)),
                 (KeyCode::Char('d'), KeyModifiers::CONTROL) => Ok(Self::Move(Direction::PageDown)),
@@ -46,6 +42,10 @@ impl TryFrom<Event> for EditorCommand {
                 (KeyCode::Char('w'), KeyModifiers::CONTROL) => Ok(Self::Save),
                 (KeyCode::Char('h'), KeyModifiers::CONTROL) => Ok(Self::Help),
                 (KeyCode::Char('f'), KeyModifiers::CONTROL) => Ok(Self::Search),
+                (KeyCode::Up, _) => Ok(Self::Move(Direction::Up)),
+                (KeyCode::Down, _) => Ok(Self::Move(Direction::Down)),
+                (KeyCode::Left, _) => Ok(Self::Move(Direction::Left)),
+                (KeyCode::Right, _) => Ok(Self::Move(Direction::Right)),
                 (KeyCode::Char(char), _) => Ok(Self::Insert(char)),
                 (KeyCode::Backspace, _) => Ok(Self::Delete),
                 (KeyCode::Enter, _) => Ok(Self::NewLine),

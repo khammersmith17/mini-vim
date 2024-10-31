@@ -28,15 +28,16 @@ impl Buffer {
             is_saved: true,
         })
     }
-    /*
+
     pub fn search(&self, search_str: &str, indicies: &mut Vec<usize>) {
         indicies.clear();
 
-        for (i, line) in self.text.iter().rev().enumerate() {
-            if line.raw_string
+        for (i, line) in self.text.iter().enumerate().rev() {
+            if line.raw_string.contains(search_str) {
+                indicies.push(i);
+            }
         }
-
-    }*/
+    }
 
     pub fn assume_file_name(&mut self, filename: String) {
         self.filename = Some(filename);

@@ -1,4 +1,3 @@
-use super::view::line::Line;
 use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::style::Print;
 use crossterm::terminal::{self, disable_raw_mode, enable_raw_mode, size, Clear, ClearType};
@@ -71,7 +70,7 @@ impl Terminal {
         })
     }
 
-    pub fn print_line(row: usize, line: &str) -> Result<(), Error> {
+    pub fn render_line<T: std::fmt::Display>(row: usize, line: T) -> Result<(), Error> {
         Terminal::move_cursor_to(Position {
             width: 0,
             height: row,
@@ -81,23 +80,7 @@ impl Terminal {
         Ok(())
     }
 
-    pub fn render_line(row: usize, line: Line) -> Result<(), Error> {
-        Terminal::move_cursor_to(Position {
-            width: 0,
-            height: row,
-        })?;
-
-        Terminal::clear_line()?;
-        Terminal::print_line_type(line)?;
-        Ok(())
-    }
-
-    fn print_line_type(line: Line) -> Result<(), Error> {
-        Self::queue_command(Print(line))?;
-        Ok(())
-    }
-
-    pub fn print(output: &str) -> Result<(), Error> {
+    pub fn print<T: std::fmt::Display>(output: T) -> Result<(), Error> {
         Self::queue_command(Print(output))?;
         Ok(())
     }

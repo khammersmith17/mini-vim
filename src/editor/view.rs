@@ -1,12 +1,11 @@
 use super::terminal::{Position, Size, Terminal};
-use crossterm::event::{read, Event, KeyCode, KeyEvent};
+use crossterm::event::{read, Event, KeyCode, KeyEvent, KeyModifiers};
 use std::time::Instant;
 mod buffer;
 use super::editorcommands::{Direction, EditorCommand};
 use buffer::Buffer;
 use std::cmp::{max, min};
 pub mod line;
-use line::Line;
 
 const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
 const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -16,6 +15,13 @@ struct Help {
     time_began: Instant,
 }
 
+struct Search {
+    render_search: bool,
+    string: String,
+    previous_position: Position,
+    previous_offset: Position,
+}
+
 pub struct View {
     pub buffer: Buffer,
     pub needs_redraw: bool,
@@ -23,6 +29,7 @@ pub struct View {
     pub cursor_position: Position,
     pub screen_offset: Position,
     help_indicator: Help,
+    search: Search,
 }
 
 impl Default for View {
@@ -37,6 +44,12 @@ impl Default for View {
                 render_help: false,
                 time_began: Instant::now(),
             },
+            search: Search {
+                render_search: false,
+                string: String::new(),
+                previous_position: Position::default(),
+                previous_offset: Position::default(),
+            },
         }
     }
 }
@@ -46,7 +59,7 @@ impl View {
         if self.size.width == 0 || self.size.height == 0 {
             return;
         }
-        let screen_cut = if self.help_indicator.render_help {
+        let screen_cut = if self.help_indicator.render_help | self.search.render_search {
             2
         } else {
             1
@@ -65,10 +78,16 @@ impl View {
                     ),
                 );
             } else if self.buffer.is_empty() && current_row == self.size.height / 3 {
-                self.render_line_str(relative_row, &self.get_welcome_message());
+                self.render_line(relative_row, &self.get_welcome_message());
             } else {
-                self.render_line_str(relative_row, "~");
+                self.render_line(relative_row, "~");
             }
+        }
+        if self.search.render_search {
+            self.render_line(
+                self.size.height.saturating_sub(2),
+                &format!("Search: {}", self.search.string),
+            )
         }
         if self.help_indicator.render_help {
             self.render_help_line(self.size.height, self.size.width);
@@ -97,7 +116,7 @@ impl View {
                 "Ctrl-d = snap-down"
             );
             render_message.truncate(width);
-            self.render_line_str(height.saturating_sub(2), &render_message);
+            self.render_line(height.saturating_sub(2), &render_message);
         } else {
             self.help_indicator.render_help = false;
         }
@@ -125,15 +144,10 @@ impl View {
             format!("Filename: {} | Status: {} | Line: -", filename, saved)
         };
 
-        self.render_line_str(height.saturating_sub(1), &render_message);
+        self.render_line(height.saturating_sub(1), &render_message);
     }
 
-    pub fn render_line_str(&self, row: usize, line: &str) {
-        let result = Terminal::print_line(row, line);
-        debug_assert!(result.is_ok(), "Failed to render line string");
-    }
-
-    fn render_line(&self, row: usize, line: Line) {
+    pub fn render_line<T: std::fmt::Display>(&self, row: usize, line: T) {
         let result = Terminal::render_line(row, line);
         debug_assert!(result.is_ok(), "Failed to render line")
     }
@@ -368,7 +382,7 @@ impl View {
         })
         .expect("Error moving cursor to start");
         Terminal::clear_screen().expect("Error clearing screen");
-        self.render_line_str(0, &format!("Filename: {}", &curr_filename));
+        self.render_line(0, &format!("Filename: {}", &curr_filename));
         Terminal::move_cursor_to(Position {
             height: 0,
             width: curr_position,
@@ -391,6 +405,13 @@ impl View {
                     self.get_file_name();
                 }
                 self.buffer.save();
+            }
+            EditorCommand::Search => {
+                if self.help_indicator.render_help {
+                    self.help_indicator.render_help = false;
+                }
+                self.search.render_search = true;
+                self.handle_search();
             }
             EditorCommand::Insert(char) => {
                 self.insert_char(char);
@@ -520,5 +541,100 @@ impl View {
             //self.screen_offset.width = self.screen_offset.width.saturating_sub(1);
             self.screen_offset.width = self.screen_offset.width.saturating_add(1);
         }
+    }
+
+    fn handle_search(&mut self) {
+        self.search.previous_position = Position {
+            height: self.cursor_position.height,
+            width: self.cursor_position.width,
+        };
+        self.search.previous_offset = Position {
+            height: self.screen_offset.height,
+            width: self.screen_offset.width,
+        };
+
+        self.cursor_position.width = 0;
+
+        let mut line_indicies: Vec<usize> = Vec::new();
+
+        loop {
+            self.render_search();
+            match read() {
+                Ok(event) => {
+                    match event {
+                        Event::Key(KeyEvent {
+                            code, modifiers, ..
+                        }) => match (code, modifiers) {
+                            (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
+                                if line_indicies.len() >= 1 {
+                                    line_indicies.pop();
+                                }
+                            }
+                            (KeyCode::Char(char), _) => {
+                                self.search.string.push(char);
+                            }
+                            (KeyCode::Backspace, _) => {
+                                self.search.string.pop();
+                            }
+                            (KeyCode::Esc, _) => {
+                                //return to pre search screen state
+                                self.cursor_position = self.search.previous_position;
+                                self.screen_offset = self.search.previous_offset;
+                                break;
+                            }
+                            (KeyCode::Enter, _) => {
+                                //assume current state on screen after search
+                                break;
+                            }
+                            _ => {
+                                //not addressing any other key presses
+                            }
+                        },
+                        _ => {
+                            //not addressing other events
+                        }
+                    }
+                }
+                Err(_) => {}
+            }
+            self.buffer.search(&self.search.string, &mut line_indicies);
+
+            if line_indicies.len() != 0 {
+                self.cursor_position.height = line_indicies
+                    .get(line_indicies.len().saturating_sub(1))
+                    .expect("Out of bounds")
+                    .clone();
+                //self.screen_offset.height = self.cursor_position.height.saturating_sub(1);
+            } else {
+                self.cursor_position.height = self.search.previous_position.height
+            }
+        }
+        self.search.render_search = false;
+        self.search.string.clear();
+        // loop until done
+        // get key press, if char re render
+        // get the current inidices of a seach string
+        // render the search string
+        // ctrl-n to jump to next search
+        // if esc kill search and return to previous position
+        // if enter set current position to current search position
+    }
+
+    fn render_search(&mut self) {
+        Terminal::hide_cursor().expect("Error hiding cursor");
+        Terminal::move_cursor_to(Position {
+            height: 0,
+            width: 0,
+        })
+        .expect("Error moving cursor to start");
+        Terminal::clear_screen().expect("Error clearing screen");
+        self.render();
+        Terminal::move_cursor_to(Position {
+            height: self.cursor_position.height,
+            width: self.cursor_position.width,
+        })
+        .expect("Error moving cursor");
+        Terminal::show_cursor().expect("Error showing cursor");
+        Terminal::execute().expect("Error flushing std buffer");
     }
 }
