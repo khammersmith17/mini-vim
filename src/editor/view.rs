@@ -17,6 +17,7 @@ struct Help {
 
 struct Search {
     render_search: bool,
+    search_index: usize,
     string: String,
     previous_position: Position,
     previous_offset: Position,
@@ -46,6 +47,7 @@ impl Default for View {
             },
             search: Search {
                 render_search: false,
+                search_index: usize::default(),
                 string: String::new(),
                 previous_position: Position::default(),
                 previous_offset: Position::default(),
@@ -554,6 +556,8 @@ impl View {
         };
 
         self.cursor_position.width = 0;
+        self.search.string.clear();
+        self.search.search_index = 0;
 
         let mut line_indicies: Vec<usize> = Vec::new();
 
@@ -566,8 +570,15 @@ impl View {
                             code, modifiers, ..
                         }) => match (code, modifiers) {
                             (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
-                                if line_indicies.len() >= 1 {
-                                    line_indicies.pop();
+                                if !line_indicies.is_empty() {
+                                    self.search.search_index =
+                                        if line_indicies.len().saturating_sub(1)
+                                            > self.search.search_index
+                                        {
+                                            self.search.search_index.saturating_add(1)
+                                        } else {
+                                            0
+                                        };
                                 }
                             }
                             (KeyCode::Char(char), _) => {
@@ -601,9 +612,17 @@ impl View {
 
             if line_indicies.len() != 0 {
                 self.cursor_position.height = line_indicies
-                    .get(line_indicies.len().saturating_sub(1))
+                    .get(self.search.search_index)
                     .expect("Out of bounds")
                     .clone();
+
+                self.cursor_position.width = self.buffer.find_search_width(
+                    &self.search.string,
+                    line_indicies
+                        .get(self.search.search_index)
+                        .expect("Out of bounds")
+                        .clone(),
+                );
                 //self.screen_offset.height = self.cursor_position.height.saturating_sub(1);
             } else {
                 self.cursor_position.height = self.search.previous_position.height
