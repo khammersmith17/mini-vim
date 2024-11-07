@@ -6,6 +6,8 @@ use super::editorcommands::{Direction, EditorCommand};
 use buffer::Buffer;
 use std::cmp::{max, min};
 pub mod line;
+mod theme;
+use theme::Theme;
 
 const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
 const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -31,6 +33,7 @@ pub struct View {
     pub screen_offset: Position,
     help_indicator: Help,
     search: Search,
+    theme: Theme,
 }
 
 impl Default for View {
@@ -52,6 +55,7 @@ impl Default for View {
                 previous_position: Position::default(),
                 previous_offset: Position::default(),
             },
+            theme: Theme::default(),
         }
     }
 }
@@ -408,6 +412,9 @@ impl View {
                 }
                 self.buffer.save();
             }
+            EditorCommand::Theme => {
+                self.theme.set_theme();
+            }
             EditorCommand::Search => {
                 if self.help_indicator.render_help {
                     self.help_indicator.render_help = false;
@@ -546,14 +553,8 @@ impl View {
     }
 
     fn handle_search(&mut self) {
-        self.search.previous_position = Position {
-            height: self.cursor_position.height,
-            width: self.cursor_position.width,
-        };
-        self.search.previous_offset = Position {
-            height: self.screen_offset.height,
-            width: self.screen_offset.width,
-        };
+        self.search.previous_position = self.cursor_position.clone();
+        self.search.previous_offset = self.screen_offset.clone();
 
         self.cursor_position.width = 0;
         self.search.string.clear();
@@ -585,7 +586,9 @@ impl View {
                                 self.search.string.push(char);
                             }
                             (KeyCode::Backspace, _) => {
-                                self.search.string.pop();
+                                if !self.search.string.is_empty() {
+                                    self.search.string.pop();
+                                }
                             }
                             (KeyCode::Esc, _) => {
                                 //return to pre search screen state
@@ -610,26 +613,30 @@ impl View {
             }
             self.buffer.search(&self.search.string, &mut line_indicies);
 
-            if line_indicies.len() != 0 {
-                self.cursor_position.height = line_indicies
+            if line_indicies.is_empty() {
+                self.cursor_position = self.search.previous_position;
+                continue;
+            }
+
+            self.cursor_position.height = line_indicies
+                .get(self.search.search_index)
+                .expect("Out of bounds")
+                .clone();
+
+            if self.cursor_position.height > (self.screen_offset.height + self.size.height) {
+                self.screen_offset.height = self.cursor_position.height;
+            }
+
+            self.cursor_position.width = self.buffer.find_search_width(
+                &self.search.string,
+                line_indicies
                     .get(self.search.search_index)
                     .expect("Out of bounds")
-                    .clone();
-
-                self.cursor_position.width = self.buffer.find_search_width(
-                    &self.search.string,
-                    line_indicies
-                        .get(self.search.search_index)
-                        .expect("Out of bounds")
-                        .clone(),
-                );
-                //self.screen_offset.height = self.cursor_position.height.saturating_sub(1);
-            } else {
-                self.cursor_position.height = self.search.previous_position.height
-            }
+                    .clone(),
+            );
         }
         self.search.render_search = false;
-        self.search.string.clear();
+        self.render();
         // loop until done
         // get key press, if char re render
         // get the current inidices of a seach string
@@ -649,7 +656,10 @@ impl View {
         Terminal::clear_screen().expect("Error clearing screen");
         self.render();
         Terminal::move_cursor_to(Position {
-            height: self.cursor_position.height,
+            height: self
+                .cursor_position
+                .height
+                .saturating_sub(self.screen_offset.height),
             width: self.cursor_position.width,
         })
         .expect("Error moving cursor");

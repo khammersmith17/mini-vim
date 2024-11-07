@@ -1,5 +1,5 @@
 use crossterm::cursor::{Hide, MoveTo, Show};
-use crossterm::style::Print;
+use crossterm::style::{Color, Print, SetBackgroundColor, SetForegroundColor};
 use crossterm::terminal::{self, disable_raw_mode, enable_raw_mode, size, Clear, ClearType};
 use crossterm::{queue, Command};
 use std::io::{stdout, Error, Write};
@@ -41,6 +41,16 @@ impl Terminal {
         Self::show_cursor()?;
         Self::execute()?;
         disable_raw_mode()?;
+        Ok(())
+    }
+
+    pub fn set_background_color(color: Color) -> Result<(), Error> {
+        Self::queue_command(SetBackgroundColor(color))?;
+        Ok(())
+    }
+
+    pub fn set_foreground_color(color: Color) -> Result<(), Error> {
+        Self::queue_command(SetForegroundColor(color))?;
         Ok(())
     }
 

@@ -85,7 +85,7 @@ impl Editor {
                         }
                         self.should_quit = true;
                     } else {
-                        self.view.handle_event(command)
+                        self.view.handle_event(command);
                     }
                 }
                 Err(err) => {

@@ -2,6 +2,7 @@ use super::terminal::Size;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use std::convert::TryFrom;
 
+#[derive(Copy, Clone)]
 pub enum Direction {
     Up,
     Down,
@@ -13,6 +14,7 @@ pub enum Direction {
     Home,
 }
 
+#[derive(Copy, Clone)]
 pub enum EditorCommand {
     Move(Direction),
     Insert(char),
@@ -20,6 +22,7 @@ pub enum EditorCommand {
     Tab,
     NewLine,
     Save,
+    Theme,
     Delete,
     Search,
     Help,
@@ -42,6 +45,7 @@ impl TryFrom<Event> for EditorCommand {
                 (KeyCode::Char('w'), KeyModifiers::CONTROL) => Ok(Self::Save),
                 (KeyCode::Char('h'), KeyModifiers::CONTROL) => Ok(Self::Help),
                 (KeyCode::Char('f'), KeyModifiers::CONTROL) => Ok(Self::Search),
+                (KeyCode::Char('t'), KeyModifiers::CONTROL) => Ok(Self::Theme),
                 (KeyCode::Up, _) => Ok(Self::Move(Direction::Up)),
                 (KeyCode::Down, _) => Ok(Self::Move(Direction::Down)),
                 (KeyCode::Left, _) => Ok(Self::Move(Direction::Left)),
