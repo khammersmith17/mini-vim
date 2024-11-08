@@ -3,7 +3,7 @@ This is a terminal based text editor. Currently it supports any text editing (ut
 
 I am currently working on adding syntax highlighting and search highlighting. Eventually, I would like to also build an installer for it. The terminal interaction is using the crossterm crate.
 
-Until the installer is ready, you can fork the repo and try yourself.
+Until the installer is ready, you can fork the repo and try yourself.\
 To run a fresh working file simply execute cargo run\
 To edit an existing file: cargo run <filename>
 
