@@ -5,7 +5,7 @@ I am currently working on adding syntax highlighting and search highlighting. Ev
 
 Until the installer is ready, you can fork the repo and try yourself.\
 To run a fresh working file simply execute cargo run\
-To edit an existing file: cargo run filename
+To edit an existing file: cargo run {filename}
 
 ## Modes
 There are essentially 3 modes: normal, search, save as, and set theme.\
