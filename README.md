@@ -1,7 +1,7 @@
 ## Mini-Vim
-This is a terminal based text editor. Currently it supports any text editing (utf-8 characters work better at the moment than other characters), setting the theme, searching, resizing the terminal, and saving.\
+This is a terminal based text editor. Currently it supports any text editing (utf-8 characters work better at the moment than other characters), setting the theme, searching, resizing the terminal, and saving.
 
-I am currently working on adding syntax highlighting and search highlighting. Eventually, I would like to also build an installer for it. The terminal interaction is using the crossterm crate.\
+I am currently working on adding syntax highlighting and search highlighting. Eventually, I would like to also build an installer for it. The terminal interaction is using the crossterm crate.
 
 Until the installer is ready, you can fork the repo and try yourself.
 To run a fresh working file simply execute cargo run
@@ -21,7 +21,7 @@ Ctrl-r = Snap cursor to first line\
 Ctrl-w = Save\
 Ctrl-h = Help\
 Ctrl-f = Search\
-Ctrl-t = Theme\
+Ctrl-t = Theme
 
 ## Search Mode
 Type test to search. The cursor will move to the first match. The screen state will revert to pre search state when there are no matches.\
