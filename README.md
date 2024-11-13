@@ -24,7 +24,7 @@ Ctrl-f = Search\
 Ctrl-t = Theme
 
 ## Search Mode
-Type test to search. The cursor will move to the first match. The screen state will revert to pre search state when there are no matches.\
+Type text to search. The cursor will move to the first match. The screen state will revert to pre search state when there are no matches.\
 Ctrl-n = Move to next match.\
 Esc = Revert screen state to pre search.\
 Enter = assume current screen state in search
