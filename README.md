@@ -8,7 +8,7 @@ To run a fresh working file simply execute cargo run\
 To edit an existing file: cargo run {filename}
 
 ## Modes
-There are essentially 3 modes: normal, search, save as, and set theme.\
+There are essentially 4 modes: normal, search, save as, and set theme.\
 If there are changes to the file state when trying to exit, a message will appear asking if you want to exit without saving (Ctrl-y = Exit without saving, Ctrl-n = Save file before exit).
 
 ## Normal Mode Commands
