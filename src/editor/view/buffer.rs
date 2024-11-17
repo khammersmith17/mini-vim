@@ -1,4 +1,5 @@
 use super::line::{GraphemeWidth, Line, TextFragment};
+use crate::editor::Position;
 use std::fs::{read_to_string, OpenOptions};
 use std::io::prelude::*;
 use std::io::{Error, LineWriter};
@@ -29,28 +30,44 @@ impl Buffer {
         })
     }
 
-    pub fn search(&self, search_str: &str, indicies: &mut Vec<usize>) {
-        indicies.clear();
+    pub fn search(&self, search_str: &str) -> Vec<Position> {
+        //change to return a vector of positions of search results
+        let mut positions: Vec<Position> = Vec::new();
 
         for (i, line) in self.text.iter().enumerate() {
             if line.raw_string.contains(search_str) {
-                indicies.push(i);
+                let resulting_widths = self.find_search_widths(search_str, i);
+                for width in resulting_widths.iter() {
+                    positions.push(Position {
+                        width: *width,
+                        height: i as usize,
+                    })
+                }
             }
         }
+        positions
     }
 
-    pub fn find_search_width(&self, search_str: &str, line_index: usize) -> usize {
+    fn find_search_widths(&self, search_str: &str, line_index: usize) -> Vec<usize> {
         let mut string_split = self
             .text
             .get(line_index)
             .expect("Out of bounds error")
             .raw_string
             .split(search_str);
-        let first_slice: &str = string_split
-            .next()
-            .expect("Error getting string slice from iterator");
-
-        first_slice.len()
+        let search_len = search_str.len();
+        let first = string_split.next().expect("No split results");
+        let mut running_len = first.len();
+        let mut widths: Vec<usize> = vec![running_len.clone()];
+        for slice in string_split {
+            let current_len = slice.len();
+            running_len = running_len
+                .saturating_add(search_len)
+                .saturating_add(current_len);
+            widths.push(running_len.clone());
+        }
+        widths.pop();
+        widths
     }
 
     pub fn assume_file_name(&mut self, filename: String) {

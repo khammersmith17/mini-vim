@@ -100,6 +100,7 @@ impl fmt::Display for Line {
 }
 
 impl Line {
+    /*
     pub fn to_string(&self) -> String {
         let mut return_string = String::new();
 
@@ -110,17 +111,18 @@ impl Line {
             };
         }
         return_string
-    }
+    }*/
 
     pub fn generate_raw_string(&mut self) {
-        self.raw_string = self
-            .string
-            .iter()
-            .map(|fragment| match fragment.replacement_text {
-                Some(char) => char.to_string().clone(),
-                None => fragment.grapheme.clone(),
-            })
-            .collect();
+        self.raw_string = self.to_string();
+        /*
+        .string
+        .iter()
+        .map(|fragment| match fragment.replacement_text {
+            Some(char) => char.to_string().clone(),
+            None => fragment.grapheme.clone(),
+        })
+        .collect();*/
     }
 
     pub fn grapheme_len(&self) -> usize {

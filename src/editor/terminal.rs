@@ -71,7 +71,7 @@ impl Terminal {
 
     ///Returns the size of the terminal
     ///When usize < u16, defaults to usize
-    pub fn size() -> Result<Size, std::io::Error> {
+    pub fn size() -> Result<Size, Error> {
         let (width, height) = size()?;
         #[allow(clippy::as_conversions)]
         Ok(Size {

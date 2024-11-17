@@ -8,6 +8,8 @@ use std::cmp::{max, min};
 pub mod line;
 mod theme;
 use theme::Theme;
+mod search;
+use search::Search;
 
 const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
 const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -15,14 +17,6 @@ const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
 struct Help {
     render_help: bool,
     time_began: Instant,
-}
-
-struct Search {
-    render_search: bool,
-    search_index: usize,
-    string: String,
-    previous_position: Position,
-    previous_offset: Position,
 }
 
 pub struct View {
@@ -48,13 +42,7 @@ impl Default for View {
                 render_help: false,
                 time_began: Instant::now(),
             },
-            search: Search {
-                render_search: false,
-                search_index: usize::default(),
-                string: String::new(),
-                previous_position: Position::default(),
-                previous_offset: Position::default(),
-            },
+            search: Search::default(),
             theme: Theme::default(),
         }
     }
@@ -75,6 +63,10 @@ impl View {
             self.screen_offset.height..self.screen_offset.height + self.size.height - screen_cut
         {
             let relative_row = current_row - self.screen_offset.height;
+            if self.search.render_search && self.search.line_indicies.contains(&current_row) {
+                self.search.render_search_line(current_row, &self.buffer);
+                continue;
+            }
             if let Some(line) = self.buffer.text.get(current_row) {
                 self.render_line(
                     relative_row,
@@ -556,11 +548,13 @@ impl View {
         self.search.previous_position = self.cursor_position.clone();
         self.search.previous_offset = self.screen_offset.clone();
 
-        self.cursor_position.width = 0;
         self.search.string.clear();
         self.search.search_index = 0;
 
-        let mut line_indicies: Vec<usize> = Vec::new();
+        // keep a stack of search positions so we only need to compute the positions when the user
+        // adds to a search string
+        // when the user removes from the search string
+        // we pop the stack
 
         loop {
             self.render_search();
@@ -571,9 +565,15 @@ impl View {
                             code, modifiers, ..
                         }) => match (code, modifiers) {
                             (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
-                                if !line_indicies.is_empty() {
+                                if !self.search.stack.is_empty() {
+                                    let curr_results = self
+                                        .search
+                                        .stack
+                                        .get(self.search.stack.len() - 1)
+                                        .expect("Out of bounds in search stack");
+
                                     self.search.search_index =
-                                        if line_indicies.len().saturating_sub(1)
+                                        if curr_results.len().saturating_sub(1)
                                             > self.search.search_index
                                         {
                                             self.search.search_index.saturating_add(1)
@@ -584,20 +584,28 @@ impl View {
                             }
                             (KeyCode::Char(char), _) => {
                                 self.search.string.push(char);
+                                self.search
+                                    .stack
+                                    .push(self.buffer.search(&self.search.string));
+                                self.search.search_index = 0;
                             }
                             (KeyCode::Backspace, _) => {
                                 if !self.search.string.is_empty() {
                                     self.search.string.pop();
+                                    self.search.stack.pop();
+                                    self.search.search_index = 0;
                                 }
                             }
                             (KeyCode::Esc, _) => {
                                 //return to pre search screen state
                                 self.cursor_position = self.search.previous_position;
                                 self.screen_offset = self.search.previous_offset;
+                                self.search.stack.clear();
                                 break;
                             }
                             (KeyCode::Enter, _) => {
                                 //assume current state on screen after search
+                                self.search.stack.clear();
                                 break;
                             }
                             _ => {
@@ -611,14 +619,31 @@ impl View {
                 }
                 Err(_) => {}
             }
-            self.buffer.search(&self.search.string, &mut line_indicies);
 
-            if line_indicies.is_empty() {
-                self.cursor_position = self.search.previous_position;
+            if self.search.stack.is_empty() {
+                self.revert_screen_state();
                 continue;
             }
 
-            self.cursor_position.height = line_indicies
+            if self
+                .search
+                .stack
+                .get(self.search.stack.len() - 1)
+                .expect("Search stack is empty")
+                .is_empty()
+            {
+                self.revert_screen_state();
+                continue;
+            }
+
+            //grab the latest search results from the stack
+            //get the search index position
+
+            self.cursor_position = self
+                .search
+                .stack
+                .get(self.search.stack.len() - 1)
+                .expect("Search stack empty")
                 .get(self.search.search_index)
                 .expect("Out of bounds")
                 .clone();
@@ -626,14 +651,7 @@ impl View {
             if self.cursor_position.height > (self.screen_offset.height + self.size.height) {
                 self.screen_offset.height = self.cursor_position.height;
             }
-
-            self.cursor_position.width = self.buffer.find_search_width(
-                &self.search.string,
-                line_indicies
-                    .get(self.search.search_index)
-                    .expect("Out of bounds")
-                    .clone(),
-            );
+            self.search.set_line_indicies();
         }
         self.search.render_search = false;
         self.render();
@@ -644,6 +662,11 @@ impl View {
         // ctrl-n to jump to next search
         // if esc kill search and return to previous position
         // if enter set current position to current search position
+    }
+
+    fn revert_screen_state(&mut self) {
+        self.cursor_position = self.search.previous_position;
+        self.screen_offset = self.search.previous_offset;
     }
 
     fn render_search(&mut self) {
