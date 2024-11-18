@@ -466,6 +466,7 @@ impl View {
                     .get(self.cursor_position.height)
                     .expect("Out of bounds error")
                     .grapheme_len();
+
                 if self.cursor_position.width == grapheme_len {
                     self.buffer.new_line(self.cursor_position.height);
                 } else {
@@ -474,7 +475,11 @@ impl View {
                 }
 
                 self.cursor_position.height = self.cursor_position.height.saturating_add(1);
-                self.cursor_position.width = 0;
+                self.cursor_position.width = if self.buffer.is_tab(self.cursor_position.height, 4) {
+                    4
+                } else {
+                    0
+                };
                 self.handle_offset_screen_snap(height, width);
             }
             EditorCommand::Help => {

@@ -1,2 +1,4 @@
 /target
 test-documents/test.txt
+tests/*
+src/editor/test/*

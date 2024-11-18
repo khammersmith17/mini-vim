@@ -36,7 +36,9 @@ impl Search {
             .stack
             .get(self.stack.len().saturating_sub(1))
             .expect("Stack is empty");
+
         self.line_indicies.clear();
+
         for position in curr_positions.iter() {
             self.line_indicies.insert(position.height);
         }
@@ -72,12 +74,5 @@ impl Search {
                 .expect("Error queuing command");
             Terminal::queue_command(Print(text)).expect("Error queuing command");
         }
-
-        /*
-        if current_line.ends_with(&self.string) {
-            Terminal::queue_command(PrintStyledContent(styled_search.clone()))
-                .expect("Error queueing command");
-        }
-        */
     }
 }

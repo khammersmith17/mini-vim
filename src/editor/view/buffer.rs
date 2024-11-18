@@ -182,7 +182,7 @@ impl Buffer {
         }
     }
 
-    fn is_tab(&self, line_index: usize, width_index: usize) -> bool {
+    pub fn is_tab(&self, line_index: usize, width_index: usize) -> bool {
         if width_index < 4 {
             return false;
         }
@@ -210,6 +210,11 @@ impl Buffer {
                 raw_string: String::new(),
             },
         );
+
+        if self.is_tab(line_index, 4) {
+            self.insert_tab(line_index.saturating_add(1), 0);
+        }
+
         self.is_saved = false;
     }
 
@@ -221,6 +226,7 @@ impl Buffer {
             .string
             .get(width_index..)
             .expect("Out of bounds error");
+
         self.text.insert(
             line_index.saturating_add(1),
             Line {
@@ -228,6 +234,7 @@ impl Buffer {
                 raw_string: String::new(),
             },
         );
+
         self.text
             .get_mut(line_index)
             .expect("Out of bounds error")
@@ -238,6 +245,7 @@ impl Buffer {
             .get_mut(line_index.saturating_add(1))
             .expect("Out of bounds error")
             .generate_raw_string();
+
         self.is_saved = false;
     }
 
@@ -248,12 +256,15 @@ impl Buffer {
             .expect("Out of bounds error")
             .string
             .clone();
+
         self.text.remove(line_index);
+
         self.text
             .get_mut(line_index.saturating_sub(1))
             .expect("Out of bounds error")
             .string
             .append(&mut current_line);
+
         self.is_saved = false;
 
         self.text
