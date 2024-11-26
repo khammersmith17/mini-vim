@@ -498,12 +498,15 @@ impl View {
                     .text
                     .len()
                     .saturating_sub(height)
-                    .saturating_add(1),
+                    .saturating_add(2),
                 self.cursor_position
                     .height
                     .saturating_sub(height)
-                    .saturating_add(1),
+                    .saturating_add(2),
             );
+            if self.search.render_search | self.help_indicator.render_help {
+                self.screen_offset.height = self.screen_offset.height.saturating_add(1);
+            }
         }
 
         if self.cursor_position.height == 0 {
@@ -523,14 +526,18 @@ impl View {
         }
     }
     fn update_offset_single_move(&mut self, height: usize, width: usize) {
-        //if cursor moves beyond height + offset -> increment height
-        if self.cursor_position.height >= height + self.screen_offset.height {
+        // TODO:
+        // take into account the file info line
+        // and if we are rendering help or rendering search
+
+        //if cursor moves beyond height + offset -> increment height offset
+        if self.cursor_position.height >= (height + self.screen_offset.height).saturating_sub(1) {
             self.screen_offset.height = min(
                 self.screen_offset.height.saturating_add(1),
                 self.cursor_position
                     .height
                     .saturating_sub(height)
-                    .saturating_add(1),
+                    .saturating_add(2),
             );
         }
         // if height moves less than the offset -> decrement height
@@ -585,6 +592,21 @@ impl View {
                                         } else {
                                             0
                                         };
+                                }
+                            }
+                            (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
+                                if !self.search.stack.is_empty() {
+                                    let curr_results = self
+                                        .search
+                                        .stack
+                                        .get(self.search.stack.len() - 1)
+                                        .expect("Out of bounds in search stack");
+
+                                    self.search.search_index = if self.search.search_index > 0 {
+                                        self.search.search_index.saturating_sub(1)
+                                    } else {
+                                        curr_results.len()
+                                    };
                                 }
                             }
                             (KeyCode::Char(char), _) => {
@@ -643,7 +665,6 @@ impl View {
 
             //grab the latest search results from the stack
             //get the search index position
-
             self.cursor_position = self
                 .search
                 .stack
@@ -653,8 +674,9 @@ impl View {
                 .expect("Out of bounds")
                 .clone();
 
+            // if the search position is out of current screen bounds
             if self.cursor_position.height > (self.screen_offset.height + self.size.height) {
-                self.screen_offset.height = self.cursor_position.height;
+                self.handle_offset_screen_snap(self.size.height, self.size.width);
             }
             self.search.set_line_indicies();
         }
