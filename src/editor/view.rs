@@ -419,6 +419,7 @@ impl View {
                 self.update_offset_single_move(height, width);
             }
             EditorCommand::Tab => self.insert_tab(),
+            EditorCommand::Jump => self.jump_cursor(),
             EditorCommand::Delete => {
                 //todo add logic for when a line is empty
                 match self.cursor_position.width {
@@ -491,6 +492,72 @@ impl View {
         self.needs_redraw = true;
     }
 
+    fn jump_cursor(&mut self) {
+        // TODO:
+        // render the user input at line -2
+        // to do this, clear -2 line, render int
+        // read in only ints
+        // when user hits enter, assume position
+        // if number > buffer length, assume buffer.len()
+        // adjust offset after assuming the new position
+        let neg_2 = self.size.height.saturating_sub(2);
+        let render_string: String = "Jump to: ".into();
+        let mut line = 0_usize;
+        Terminal::move_cursor_to(Position {
+            height: neg_2,
+            width: 0,
+        })
+        .expect("Error moving cursor");
+        let _ = Terminal::render_line(neg_2, format!("{}", render_string));
+
+        loop {
+            match read() {
+                Ok(event) => match event {
+                    Event::Key(KeyEvent { code, .. }) => match code {
+                        KeyCode::Char(val) => {
+                            if let Some(digit) = val.to_digit(10) {
+                                line = line * 10 + digit as usize;
+                            }
+                        }
+                        KeyCode::Backspace => {
+                            line = if line > 9 { line / 10 } else { 0 };
+                        }
+                        KeyCode::Enter => {
+                            // if line > buffer.len(), give buffer len
+                            if line < self.buffer.text.len() {
+                                self.cursor_position.height = line.saturating_sub(1);
+                            } else {
+                                self.move_cursor(Direction::PageDown);
+                            };
+
+                            if self.cursor_position.height
+                                > self.size.height + self.screen_offset.height
+                            {
+                                self.handle_offset_screen_snap(self.size.height, self.size.width);
+                            }
+                            break;
+                        }
+                        KeyCode::Esc => {
+                            break;
+                        }
+                        _ => {}
+                    },
+                    _ => {}
+                },
+                Err(_) => {}
+            }
+            match line {
+                0 => {
+                    let _ = Terminal::render_line(neg_2, &format!("{}", render_string));
+                }
+                _ => {
+                    let _ = Terminal::render_line(neg_2, &format!("{}{}", render_string, line));
+                }
+            }
+            let _ = Terminal::execute();
+        }
+    }
+
     fn handle_offset_screen_snap(&mut self, height: usize, width: usize) {
         if self.cursor_position.height >= height + self.screen_offset.height {
             self.screen_offset.height = min(
@@ -526,10 +593,6 @@ impl View {
         }
     }
     fn update_offset_single_move(&mut self, height: usize, width: usize) {
-        // TODO:
-        // take into account the file info line
-        // and if we are rendering help or rendering search
-
         //if cursor moves beyond height + offset -> increment height offset
         if self.cursor_position.height >= (height + self.screen_offset.height).saturating_sub(1) {
             self.screen_offset.height = min(

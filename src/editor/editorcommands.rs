@@ -19,6 +19,7 @@ pub enum EditorCommand {
     Move(Direction),
     Insert(char),
     Resize(Size),
+    Jump,
     Tab,
     NewLine,
     Save,
@@ -38,6 +39,7 @@ impl TryFrom<Event> for EditorCommand {
                 code, modifiers, ..
             }) => match (code, modifiers) {
                 (KeyCode::Char('q'), KeyModifiers::CONTROL) => Ok(Self::Quit),
+                (KeyCode::Char('j'), KeyModifiers::CONTROL) => Ok(Self::Jump),
                 (KeyCode::Char('l'), KeyModifiers::CONTROL) => Ok(Self::Move(Direction::Home)),
                 (KeyCode::Char('u'), KeyModifiers::CONTROL) => Ok(Self::Move(Direction::PageUp)),
                 (KeyCode::Char('d'), KeyModifiers::CONTROL) => Ok(Self::Move(Direction::PageDown)),
