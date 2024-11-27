@@ -1,8 +1,9 @@
 use crate::editor::{
-    terminal::{Position, Terminal},
+    terminal::{Position, Size, Terminal},
     view::Buffer,
 };
 use crossterm::style::{Attribute, Color, Print, PrintStyledContent, StyledContent, Stylize};
+use std::cmp::min;
 use std::collections::HashSet;
 
 pub struct Search {
@@ -43,7 +44,13 @@ impl Search {
             self.line_indicies.insert(position.height);
         }
     }
-    pub fn render_search_line(&mut self, line: usize, buffer: &Buffer) {
+    pub fn render_search_line(
+        &mut self,
+        line: usize,
+        buffer: &Buffer,
+        offset: &Position,
+        size: &Size,
+    ) {
         //grab the current lint
         //style the search hit
         //render the search hits and plain text
@@ -60,7 +67,10 @@ impl Search {
         })
         .expect("Error moving cursor");
 
-        let current_line = &buffer.text.get(line).expect("Out of bounds").raw_string;
+        let full_line = &buffer.text.get(line).expect("Out of bounds").raw_string;
+        let start = offset.width;
+        let end = min(offset.width.saturating_add(size.width), full_line.len());
+        let current_line = full_line.get(start..end).unwrap();
 
         let mut split = current_line.split(&self.string);
         if let Some(first) = split.next() {

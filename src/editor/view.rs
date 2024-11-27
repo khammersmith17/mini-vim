@@ -64,7 +64,12 @@ impl View {
         {
             let relative_row = current_row - self.screen_offset.height;
             if self.search.render_search && self.search.line_indicies.contains(&current_row) {
-                self.search.render_search_line(current_row, &self.buffer);
+                self.search.render_search_line(
+                    current_row,
+                    &self.buffer,
+                    &self.screen_offset,
+                    &self.size,
+                );
                 continue;
             }
             if let Some(line) = self.buffer.text.get(current_row) {
@@ -108,8 +113,8 @@ impl View {
                 "HELP: {} | {} | {} | {} | {} | {}",
                 "Ctrl-w = save",
                 "Ctrl-q = quit",
-                "Ctrl-l = snap-left",
-                "Ctrl-r = snap-right",
+                "Ctrl-j = jump-to",
+                "Ctrl-f = search",
                 "Ctrl-u = snap-up",
                 "Ctrl-d = snap-down"
             );
@@ -151,8 +156,7 @@ impl View {
     }
     pub fn resize(&mut self, size: Size) {
         self.size = size;
-        let Size { height, width } = size;
-        self.handle_offset_screen_snap(height, width);
+        self.handle_offset_screen_snap();
     }
 
     pub fn load(&mut self, filename: &str) {
@@ -187,7 +191,6 @@ impl View {
     pub fn move_cursor(&mut self, key_code: Direction) {
         if !self.buffer.is_empty() {
             let mut snap = false;
-            let Size { height, width } = Terminal::size().unwrap();
             match key_code {
                 //if not on last line, move down
                 //if the next line is shorter, snap to the end of that line
@@ -289,9 +292,9 @@ impl View {
                 }
             }
             if snap {
-                self.handle_offset_screen_snap(height, width);
+                self.handle_offset_screen_snap();
             } else {
-                self.update_offset_single_move(height, width);
+                self.update_offset_single_move();
             }
         } else {
             self.cursor_position.width = 0;
@@ -392,7 +395,6 @@ impl View {
 
     pub fn handle_event(&mut self, command: EditorCommand) {
         //match the event to the enum value and handle the event accrodingly
-        let Size { height, width } = Terminal::size().expect("Error getting size");
         match command {
             EditorCommand::Move(direction) => self.move_cursor(direction),
             EditorCommand::Resize(size) => {
@@ -416,7 +418,7 @@ impl View {
             }
             EditorCommand::Insert(char) => {
                 self.insert_char(char);
-                self.update_offset_single_move(height, width);
+                self.update_offset_single_move();
             }
             EditorCommand::Tab => self.insert_tab(),
             EditorCommand::Jump => self.jump_cursor(),
@@ -441,7 +443,7 @@ impl View {
                                 .get(self.cursor_position.height)
                                 .expect("Out of bounds error")
                                 .grapheme_len();
-                            self.handle_offset_screen_snap(height, width);
+                            self.handle_offset_screen_snap();
                         } else {
                             let new_width = self
                                 .buffer
@@ -481,7 +483,7 @@ impl View {
                 } else {
                     0
                 };
-                self.handle_offset_screen_snap(height, width);
+                self.handle_offset_screen_snap();
             }
             EditorCommand::Help => {
                 self.help_indicator.render_help = true;
@@ -533,7 +535,7 @@ impl View {
                             if self.cursor_position.height
                                 > self.size.height + self.screen_offset.height
                             {
-                                self.handle_offset_screen_snap(self.size.height, self.size.width);
+                                self.handle_offset_screen_snap();
                             }
                             break;
                         }
@@ -558,22 +560,24 @@ impl View {
         }
     }
 
-    fn handle_offset_screen_snap(&mut self, height: usize, width: usize) {
-        if self.cursor_position.height >= height + self.screen_offset.height {
+    fn handle_offset_screen_snap(&mut self) {
+        if self.cursor_position.height >= self.size.height + self.screen_offset.height {
             self.screen_offset.height = min(
                 self.buffer
                     .text
                     .len()
-                    .saturating_sub(height)
+                    .saturating_sub(self.size.height)
                     .saturating_add(2),
                 self.cursor_position
                     .height
-                    .saturating_sub(height)
+                    .saturating_sub(self.size.height)
                     .saturating_add(2),
             );
             if self.search.render_search | self.help_indicator.render_help {
                 self.screen_offset.height = self.screen_offset.height.saturating_add(1);
             }
+        } else if self.cursor_position.height < self.screen_offset.height {
+            self.screen_offset.height = self.cursor_position.height.saturating_sub(1);
         }
 
         if self.cursor_position.height == 0 {
@@ -584,22 +588,26 @@ impl View {
             self.screen_offset.width = 0;
         }
 
-        if self.cursor_position.width >= width + self.screen_offset.width {
+        if self.cursor_position.width >= self.size.width + self.screen_offset.width {
             self.screen_offset.width = self
                 .cursor_position
                 .width
-                .saturating_sub(width)
+                .saturating_sub(self.size.width)
                 .saturating_add(1);
+        } else if self.cursor_position.width < self.screen_offset.width {
+            self.screen_offset.width = self.cursor_position.width.saturating_sub(1);
         }
     }
-    fn update_offset_single_move(&mut self, height: usize, width: usize) {
+    fn update_offset_single_move(&mut self) {
         //if cursor moves beyond height + offset -> increment height offset
-        if self.cursor_position.height >= (height + self.screen_offset.height).saturating_sub(1) {
+        if self.cursor_position.height
+            >= (self.size.height + self.screen_offset.height).saturating_sub(1)
+        {
             self.screen_offset.height = min(
                 self.screen_offset.height.saturating_add(1),
                 self.cursor_position
                     .height
-                    .saturating_sub(height)
+                    .saturating_sub(self.size.height)
                     .saturating_add(2),
             );
         }
@@ -613,7 +621,7 @@ impl View {
         }
         // if new position is greater than offset, offset gets current_width - screen width
         // this better handles snapping the cursor to the end of the line
-        if self.cursor_position.width >= width + self.screen_offset.width {
+        if self.cursor_position.width >= self.size.width + self.screen_offset.width {
             //self.screen_offset.width = self.screen_offset.width.saturating_sub(1);
             self.screen_offset.width = self.screen_offset.width.saturating_add(1);
         }
@@ -738,8 +746,10 @@ impl View {
                 .clone();
 
             // if the search position is out of current screen bounds
-            if self.cursor_position.height > (self.screen_offset.height + self.size.height) {
-                self.handle_offset_screen_snap(self.size.height, self.size.width);
+            if self.cursor_position.height > (self.screen_offset.height + self.size.height)
+                || self.cursor_position.height < self.screen_offset.height
+            {
+                self.handle_offset_screen_snap();
             }
             self.search.set_line_indicies();
         }
