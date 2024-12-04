@@ -9,16 +9,6 @@ pub enum GraphemeWidth {
     Half,
     Full,
 }
-/*
-impl GraphemeWidth {
-    fn saturating_add(&self, other: usize) -> usize {
-        match self {
-            Self::Half => other.saturating_add(1),
-            Self::Full => other.saturating_add(2),
-        }
-    }
-}
-*/
 
 #[derive(Debug, Clone)]
 struct TextFragmentError;
@@ -100,29 +90,8 @@ impl fmt::Display for Line {
 }
 
 impl Line {
-    /*
-    pub fn to_string(&self) -> String {
-        let mut return_string = String::new();
-
-        for fragment in self.string.iter() {
-            match fragment.replacement_text {
-                Some(char) => return_string.push(char),
-                None => return_string.push_str(&fragment.grapheme),
-            };
-        }
-        return_string
-    }*/
-
     pub fn generate_raw_string(&mut self) {
         self.raw_string = self.to_string();
-        /*
-        .string
-        .iter()
-        .map(|fragment| match fragment.replacement_text {
-            Some(char) => char.to_string().clone(),
-            None => fragment.grapheme.clone(),
-        })
-        .collect();*/
     }
 
     pub fn grapheme_len(&self) -> usize {
@@ -189,36 +158,6 @@ impl Line {
             raw_string: line_str.to_string(),
         }
     }
-    /*
-        pub fn get(&self, range: Range<usize>) -> String {
-            if range.start >= range.end {
-                return String::new();
-            }
-
-            let mut result_string = String::new();
-            let mut current_position = 0;
-            for fragment in &self.string {
-                let end = fragment.render_width.saturating_add(current_position);
-                if current_position > range.end {
-                    break;
-                }
-
-                if end > range.start {
-                    if end > range.end || current_position < range.start {
-                        result_string.push('~');
-                    } else if let Some(char) = fragment.replacement_text {
-                        result_string.push(char);
-                    } else {
-                        result_string.push_str(&fragment.grapheme)
-                    }
-                }
-
-                current_position = end;
-            }
-
-            result_string
-        }
-    */
 
     pub fn get_line_subset(&self, range: Range<usize>) -> Line {
         let end = std::cmp::min(range.end, self.string.len());
