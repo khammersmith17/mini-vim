@@ -112,6 +112,80 @@ impl Line {
         len
     }
 
+    pub fn get_next_word(&self, start: usize) -> Option<usize> {
+        if self.is_empty() {
+            return None;
+        }
+        let mut space_pos = start.clone();
+        for (i, c) in self
+            .raw_string
+            .as_bytes()
+            .into_iter()
+            .skip(start)
+            .enumerate()
+        {
+            space_pos = i + start;
+            if *c == 32 {
+                break;
+            }
+        }
+        space_pos += 1;
+
+        for (i, c) in self
+            .raw_string
+            .as_bytes()
+            .into_iter()
+            .skip(space_pos)
+            .enumerate()
+        {
+            if *c != 32 {
+                return Some(i + space_pos);
+            }
+        }
+
+        None
+    }
+
+    pub fn next_word_spillover(&self) -> Option<usize> {
+        if self.is_empty() {
+            return None;
+        }
+        let chars = self.raw_string.as_bytes();
+        if chars[0] != 32 {
+            return Some(0);
+        }
+
+        for (i, c) in chars.into_iter().skip(1).enumerate() {
+            if *c != 32 {
+                return Some(i + 1);
+            }
+        }
+
+        return None;
+    }
+
+    pub fn get_prev_word(&self, start: Option<usize>) -> Option<usize> {
+        let search_start = if start.is_some() {
+            start.unwrap()
+        } else {
+            self.raw_string.len().saturating_sub(1)
+        };
+
+        for (i, c) in self
+            .raw_string
+            .get(..search_start)
+            .unwrap()
+            .chars()
+            .rev()
+            .enumerate()
+        {
+            if c as u8 == 32 {
+                return Some(i.saturating_add(1));
+            }
+        }
+        None
+    }
+
     pub fn from(line_str: &str) -> Self {
         let line = line_str
             .graphemes(true)

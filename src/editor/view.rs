@@ -388,6 +388,7 @@ impl View {
         //match the event to the enum value and handle the event accrodingly
         match command {
             EditorCommand::Move(direction) => self.move_cursor(direction),
+            EditorCommand::JumpWord(direction) => self.jump_word(direction),
             EditorCommand::Resize(size) => {
                 self.resize(size);
             }
@@ -412,7 +413,7 @@ impl View {
                 self.update_offset_single_move();
             }
             EditorCommand::Tab => self.insert_tab(),
-            EditorCommand::Jump => self.jump_cursor(),
+            EditorCommand::JumpLine => self.jump_cursor(),
             EditorCommand::Delete => {
                 //todo add logic for when a line is empty
                 match self.cursor_position.width {
@@ -783,5 +784,13 @@ impl View {
         .unwrap();
         Terminal::show_cursor().unwrap();
         Terminal::execute().unwrap();
+    }
+
+    fn jump_word(&mut self, dir: Direction) {
+        match dir {
+            Direction::Right => self.buffer.find_next_word(&mut self.cursor_position),
+            Direction::Left => self.buffer.find_prev_word(&mut self.cursor_position),
+            _ => {} //direction should only be left or right at this point
+        };
     }
 }
