@@ -117,6 +117,7 @@ impl Line {
             return None;
         }
         let mut space_pos = start.clone();
+
         for (i, c) in self
             .raw_string
             .as_bytes()
@@ -164,26 +165,50 @@ impl Line {
         return None;
     }
 
-    pub fn get_prev_word(&self, start: Option<usize>) -> Option<usize> {
-        let search_start = if start.is_some() {
-            start.unwrap()
-        } else {
-            self.raw_string.len().saturating_sub(1)
-        };
+    pub fn get_prev_word(&self, start: usize) -> Option<usize> {
+        if self.is_empty() {
+            return None;
+        }
 
-        for (i, c) in self
-            .raw_string
-            .get(..search_start)
-            .unwrap()
-            .chars()
-            .rev()
-            .enumerate()
-        {
-            if c as u8 == 32 {
-                return Some(i.saturating_add(1));
+        let mut pos = start.clone();
+        for c in self.raw_string.as_bytes()[..start].into_iter().rev() {
+            pos -= 1;
+            if *c == 32 {
+                break;
             }
         }
+
+        if (pos == start) | (pos == 0_usize) {
+            return None;
+        }
+
+        pos -= 1;
+        for c in self.raw_string.as_bytes()[..pos].into_iter().rev() {
+            pos -= 1;
+            if *c != 32 {
+                return Some(pos + 1);
+            }
+        }
+
         None
+    }
+
+    pub fn get_prev_word_spillover(&self) -> Option<usize> {
+        if self.is_empty() {
+            return None;
+        }
+        let len = self.raw_string.len().saturating_sub(1);
+        let bytes = self.raw_string.as_bytes();
+        if bytes[len] != 32 {
+            return Some(len.into());
+        }
+        for (i, c) in bytes.into_iter().rev().enumerate().skip(1) {
+            if *c != 32 {
+                return Some(i - 1);
+            }
+        }
+
+        return None;
     }
 
     pub fn from(line_str: &str) -> Self {

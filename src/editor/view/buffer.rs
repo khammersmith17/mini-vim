@@ -48,7 +48,7 @@ impl Buffer {
         positions
     }
 
-    pub fn find_prev_word(&self, start_position: &mut Position) {
+    pub fn find_prev_word(&self, position: &mut Position) {
         // find the prev word
         // start at current line
         // if the prev word is only the following line,
@@ -58,24 +58,22 @@ impl Buffer {
             return;
         }
 
-        if let Some(new_width) =
-            self.text[start_position.height].get_prev_word(Some(start_position.width))
-        {
-            start_position.width = new_width;
+        if let Some(new_width) = self.text[position.height].get_prev_word(position.width) {
+            position.width = new_width;
+            return;
         }
-        if start_position.height == 0 {
-            start_position.width = 0;
+        while position.height > 0 {
+            position.height -= 1;
+            if let Some(new_width) = self.text[position.height].get_prev_word_spillover() {
+                position.width = new_width;
+                return;
+            }
         }
 
-        if let Some(new_width) =
-            self.text[start_position.height.saturating_sub(1)].get_prev_word(None)
-        {
-            start_position.height = start_position.height.saturating_sub(1);
-            start_position.width = new_width;
-        }
+        position.width = 0;
     }
 
-    pub fn find_next_word(&self, start_position: &mut Position) {
+    pub fn find_next_word(&self, position: &mut Position) {
         // find the next word
         // start at current line
         // if the next word is only the following line,
@@ -85,24 +83,22 @@ impl Buffer {
             return;
         }
 
-        if let Some(new_width) =
-            self.text[start_position.height].get_next_word(start_position.width)
-        {
-            start_position.width = new_width;
+        if let Some(new_width) = self.text[position.height].get_next_word(position.width) {
+            position.width = new_width;
             return;
         }
 
         // here look for the next char following a space
         // go to next line until we reach EOF
-        while start_position.height < self.text.len().saturating_sub(1) {
-            start_position.height += 1;
+        while position.height < self.text.len().saturating_sub(1) {
+            position.height += 1;
 
-            if let Some(new_width) = self.text[start_position.height].next_word_spillover() {
-                start_position.width = new_width;
+            if let Some(new_width) = self.text[position.height].next_word_spillover() {
+                position.width = new_width;
                 return;
             }
         }
-        start_position.width = self.text[start_position.height].grapheme_len();
+        position.width = self.text[position.height].grapheme_len();
     }
 
     fn find_search_widths(&self, search_str: &str, line_index: usize) -> Vec<usize> {
