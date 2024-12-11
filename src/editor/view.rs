@@ -645,12 +645,8 @@ impl View {
                         }) => match (code, modifiers) {
                             (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
                                 if !self.search.stack.is_empty() {
-                                    let curr_results = self
-                                        .search
-                                        .stack
-                                        .get(self.search.stack.len() - 1)
-                                        .expect("Out of bounds in search stack");
-
+                                    let curr_results =
+                                        self.search.stack.get(self.search.stack.len() - 1).unwrap();
                                     self.search.search_index =
                                         if curr_results.len().saturating_sub(1)
                                             > self.search.search_index
@@ -663,12 +659,8 @@ impl View {
                             }
                             (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
                                 if !self.search.stack.is_empty() {
-                                    let curr_results = self
-                                        .search
-                                        .stack
-                                        .get(self.search.stack.len() - 1)
-                                        .expect("Out of bounds in search stack");
-
+                                    let curr_results =
+                                        self.search.stack.get(self.search.stack.len() - 1).unwrap();
                                     self.search.search_index = if self.search.search_index > 0 {
                                         self.search.search_index.saturating_sub(1)
                                     } else {

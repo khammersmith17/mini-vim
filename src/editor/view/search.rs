@@ -30,6 +30,12 @@ impl Default for Search {
     }
 }
 
+enum SearchResolver {
+    Left,
+    Mid,
+    Right,
+}
+
 impl Search {
     pub fn find_relative_start(&self, curr_height: &usize) -> Option<usize> {
         // binary search to find the closest search result to pre search cursor position
@@ -43,7 +49,7 @@ impl Search {
             };
         let mut l: usize = 0;
         let mut r: usize = current_positions.len().saturating_sub(1);
-        if r >= l {
+        if r <= l {
             return None;
         }
 
@@ -53,7 +59,16 @@ impl Search {
                 | ((current_positions[m - 1].height < *curr_height)
                     & (current_positions[m + 1].height > *curr_height))
             {
-                return Some(current_positions[m].height as usize);
+                match Self::resolve_closest(
+                    *curr_height,
+                    current_positions[m - 1].height,
+                    current_positions[m].height,
+                    current_positions[m + 1].height,
+                ) {
+                    SearchResolver::Left => return Some(m - 1),
+                    SearchResolver::Mid => return Some(m),
+                    SearchResolver::Right => return Some(m + 1),
+                }
             } else if current_positions[m].height > *curr_height {
                 r = m - 1;
             } else {
@@ -62,6 +77,26 @@ impl Search {
             m = (r - l) / 2 + l;
         }
         return None;
+    }
+
+    fn resolve_closest(curr: usize, left: usize, mid: usize, right: usize) -> SearchResolver {
+        // resolves the closests search position to cursor
+        // within the range on values returned in binary search
+        if curr > mid {
+            let res = if right - curr < curr - mid {
+                SearchResolver::Right
+            } else {
+                SearchResolver::Mid
+            };
+            return res;
+        } else {
+            let res = if curr - left < mid - curr {
+                SearchResolver::Left
+            } else {
+                SearchResolver::Mid
+            };
+            return res;
+        }
     }
 
     pub fn render_search_string(&self, size: &Size) {
@@ -133,5 +168,32 @@ impl Search {
             Terminal::queue_command(PrintStyledContent(styled_search.clone())).unwrap();
             Terminal::queue_command(Print(text)).unwrap();
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+
+    use super::*;
+    #[test]
+    fn search_find_closest_position() {
+        let mut search = Search::default();
+        let heights: Vec<usize> = vec![4, 9, 12, 30, 39, 45, 56, 63];
+        let mut positions = Vec::new();
+        for i in heights.iter() {
+            positions.push(Position {
+                height: *i,
+                width: 0,
+            })
+        }
+        search.stack = vec![positions];
+        let mut pos = search.find_relative_start(&10);
+        assert_eq!(pos.unwrap(), 1);
+        pos = search.find_relative_start(&15);
+        assert_eq!(pos.unwrap(), 2);
+        pos = search.find_relative_start(&25);
+        assert_eq!(pos.unwrap(), 3);
+        pos = search.find_relative_start(&40);
+        assert_eq!(pos.unwrap(), 4);
     }
 }

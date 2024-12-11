@@ -38,13 +38,12 @@ impl Theme {
             if cursor_position != 1 as usize {
                 cursor_position = 1;
             }
-            Terminal::clear_screen().expect("Error clearing screen");
-            Terminal::render_line(0 as usize, &render_screen).expect("Error rendering line");
+            Terminal::clear_screen().unwrap();
+            Terminal::render_line(0 as usize, &render_screen).unwrap();
             for (line_index, color) in options.iter().enumerate() {
-                Terminal::render_line(line_index.saturating_add(1), &color)
-                    .expect("Error rendering theme screen");
+                Terminal::render_line(line_index.saturating_add(1), &color).unwrap();
             }
-            Terminal::execute().expect("Error flushing queue");
+            Terminal::execute().unwrap();
             Self::move_cursor(cursor_position);
             loop {
                 match read() {
