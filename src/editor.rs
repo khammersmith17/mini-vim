@@ -1,3 +1,4 @@
+use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{read, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 mod terminal;
 use std::env::args;
@@ -171,6 +172,7 @@ impl Editor {
 
 impl Drop for Editor {
     fn drop(&mut self) {
+        let _ = Terminal::set_cursor_style(SetCursorStyle::DefaultUserShape);
         let _ = Terminal::terminate();
         if self.should_quit {
             let _ = Terminal::print("Goodbye.\r\n");

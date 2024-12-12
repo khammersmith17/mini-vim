@@ -63,6 +63,8 @@ impl View {
                     &self.buffer,
                     &self.screen_offset,
                     &self.size,
+                    self.theme.search_highlight,
+                    self.theme.search_text,
                 );
                 continue;
             }
@@ -762,6 +764,8 @@ impl View {
     }
 
     fn render_search(&mut self) {
+        // this largely is the same logic as Editor::refresh_screen
+        // maybe that logic should be called out of view to not reproduce code
         Terminal::hide_cursor().unwrap();
         Terminal::move_cursor_to(self.screen_offset).unwrap();
         Terminal::clear_screen().unwrap();

@@ -1,11 +1,26 @@
 use crate::editor::terminal::{Position, Terminal};
+use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{read, Event, KeyCode, KeyEvent};
 use crossterm::style::Color;
 
-#[derive(Default)]
 pub struct Theme {
-    foreground: Option<Color>,
-    background: Option<Color>,
+    foreground: Color,
+    background: Color,
+    pub search_highlight: Color,
+    pub search_text: Color,
+    cursor_style: SetCursorStyle,
+}
+
+impl Default for Theme {
+    fn default() -> Theme {
+        Theme {
+            foreground: Color::White,
+            background: Color::Black,
+            search_highlight: Color::Blue,
+            search_text: Color::White,
+            cursor_style: SetCursorStyle::DefaultUserShape,
+        }
+    }
 }
 
 impl Theme {
@@ -29,20 +44,42 @@ impl Theme {
             "DarkCyan".into(),
             "Grey".into(),
         ];
-        let mut user_choices: [String; 2] = Default::default();
-        let render_option: [String; 2] = [
-            "Select text color:".into(),
-            "Select background color".into(),
+
+        let cursor_options: [String; 7] = [
+            "DefaultUserShape".into(),
+            "BlinkingBlock".into(),
+            "SteadyBlock".into(),
+            "BlinkingUnderScore".into(),
+            "SteadyUnderScore".into(),
+            "BlinkingBar".into(),
+            "SteadyBar".into(),
         ];
+
+        let mut user_choices: [String; 5] = Default::default();
+
+        let render_option: [String; 5] = [
+            "Select text color:".into(),
+            "Select background color:".into(),
+            "Select search highlight color:".into(),
+            "Select search text color:".into(),
+            "Select cursor style:".into(),
+        ];
+
+        Terminal::clear_screen().unwrap();
+        for (line_index, color) in options.iter().enumerate() {
+            Terminal::render_line(line_index.saturating_add(1), &color).unwrap();
+        }
         for (choice_index, render_screen) in render_option.iter().enumerate() {
             if cursor_position != 1 as usize {
                 cursor_position = 1;
             }
-            Terminal::clear_screen().unwrap();
-            Terminal::render_line(0 as usize, &render_screen).unwrap();
-            for (line_index, color) in options.iter().enumerate() {
-                Terminal::render_line(line_index.saturating_add(1), &color).unwrap();
+            if choice_index == 4 {
+                Terminal::clear_screen().unwrap();
+                for (line_index, option) in cursor_options.iter().enumerate() {
+                    Terminal::render_line(line_index.saturating_add(1), &option).unwrap();
+                }
             }
+            Terminal::render_line(0 as usize, &render_screen).unwrap();
             Terminal::execute().unwrap();
             Self::move_cursor(cursor_position);
             loop {
@@ -51,24 +88,38 @@ impl Theme {
                         match event {
                             Event::Key(KeyEvent { code, .. }) => match code {
                                 KeyCode::Up => {
-                                    if cursor_position > 1 as usize {
+                                    if cursor_position > 1_usize {
                                         cursor_position = cursor_position.saturating_sub(1);
                                         Self::move_cursor(cursor_position);
                                     }
                                 }
 
                                 KeyCode::Down => {
-                                    cursor_position = std::cmp::min(
-                                        cursor_position.saturating_add(1),
-                                        15 as usize,
-                                    );
+                                    if choice_index != 4 {
+                                        cursor_position = std::cmp::min(
+                                            cursor_position.saturating_add(1),
+                                            16_usize,
+                                        );
+                                    } else {
+                                        cursor_position = std::cmp::min(
+                                            cursor_position.saturating_add(1),
+                                            7_usize,
+                                        );
+                                    }
                                     Self::move_cursor(cursor_position);
                                 }
                                 KeyCode::Enter => {
-                                    user_choices[choice_index] = options
-                                        .get(cursor_position.saturating_sub(1))
-                                        .expect("Out of bounds")
-                                        .to_string();
+                                    if choice_index != 4 {
+                                        user_choices[choice_index] = options
+                                            .get(cursor_position.saturating_sub(1))
+                                            .expect("Out of bounds")
+                                            .to_string();
+                                    } else {
+                                        user_choices[choice_index] = cursor_options
+                                            .get(cursor_position.saturating_sub(1))
+                                            .expect("Out of bounds")
+                                            .to_string();
+                                    }
                                     break;
                                 }
                                 KeyCode::Esc => {
@@ -88,12 +139,16 @@ impl Theme {
                 }
             }
         }
-        self.foreground = Some(Self::get_color(&user_choices[0]));
-        self.background = Some(Self::get_color(&user_choices[1]));
-        Terminal::set_foreground_color(self.foreground.expect("foreground_color is None"))
-            .expect("Error setting foreground color");
-        Terminal::set_background_color(self.background.expect("background color in None"))
-            .expect("Error setting background color");
+        self.foreground = Self::get_color(&user_choices[0]);
+        self.background = Self::get_color(&user_choices[1]);
+        self.search_highlight = Self::get_color(&user_choices[2]);
+        self.search_text = Self::get_color(&user_choices[3]);
+        self.cursor_style = Self::get_cursor_style(&user_choices[4]);
+
+        Terminal::set_foreground_color(self.foreground.clone()).unwrap();
+        Terminal::set_background_color(self.background.clone()).unwrap();
+        Terminal::set_cursor_style(self.cursor_style.clone()).unwrap();
+
         Terminal::execute().expect("Error flushing terminal queue");
     }
 
@@ -106,6 +161,19 @@ impl Theme {
         .expect("Error moving cursor");
         Terminal::show_cursor().expect("Error showing cursor");
         Terminal::execute().expect("Error flushing terminal queue");
+    }
+
+    fn get_cursor_style(style_str: &str) -> SetCursorStyle {
+        match style_str {
+            "DefaultUserShape" => SetCursorStyle::DefaultUserShape,
+            "BlinkingBlock" => SetCursorStyle::BlinkingBlock,
+            "SteadyBlock" => SetCursorStyle::SteadyBlock,
+            "BlinkingUnderScore" => SetCursorStyle::BlinkingUnderScore,
+            "SteadyUnderScore" => SetCursorStyle::SteadyUnderScore,
+            "BlinkingBar" => SetCursorStyle::BlinkingBar,
+            "SteadyBar" => SetCursorStyle::SteadyBar,
+            _ => SetCursorStyle::DefaultUserShape,
+        }
     }
 
     fn get_color(color_str: &str) -> Color {

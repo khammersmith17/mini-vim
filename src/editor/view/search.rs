@@ -134,6 +134,8 @@ impl Search {
         buffer: &Buffer,
         offset: &Position,
         size: &Size,
+        search_highlight: Color,
+        search_text: Color,
     ) {
         //grab the current lint
         //style the search hit
@@ -141,8 +143,8 @@ impl Search {
         let styled_search: StyledContent<String> = self
             .string
             .clone()
-            .with(Color::White)
-            .on(Color::Blue)
+            .with(search_text)
+            .on(search_highlight)
             .attribute(Attribute::Bold);
 
         Terminal::move_cursor_to(Position {

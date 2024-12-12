@@ -1,4 +1,4 @@
-use crossterm::cursor::{Hide, MoveTo, Show};
+use crossterm::cursor::{Hide, MoveTo, SetCursorStyle, Show};
 use crossterm::style::{Color, Print, SetBackgroundColor, SetForegroundColor};
 use crossterm::terminal::{self, disable_raw_mode, enable_raw_mode, size, Clear, ClearType};
 use crossterm::{queue, Command};
@@ -41,6 +41,11 @@ impl Terminal {
         Self::show_cursor()?;
         Self::execute()?;
         disable_raw_mode()?;
+        Ok(())
+    }
+
+    pub fn set_cursor_style(style: SetCursorStyle) -> Result<(), Error> {
+        Self::queue_command(style)?;
         Ok(())
     }
 
