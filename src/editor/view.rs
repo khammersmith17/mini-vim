@@ -1,4 +1,5 @@
 use super::terminal::{Position, Size, Terminal};
+use clipboard::{ClipboardContext, ClipboardProvider};
 use crossterm::event::{read, Event, KeyCode, KeyEvent, KeyModifiers};
 use std::time::Instant;
 mod buffer;
@@ -12,6 +13,8 @@ mod search;
 use search::Search;
 pub mod help;
 use help::Help;
+mod highlight;
+use highlight::Highlight;
 
 const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
 const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -25,6 +28,7 @@ pub struct View {
     help_indicator: Help,
     search: Search,
     theme: Theme,
+    clipboard: ClipboardContext,
 }
 
 impl Default for View {
@@ -38,6 +42,7 @@ impl Default for View {
             help_indicator: Help::default(),
             search: Search::default(),
             theme: Theme::default(),
+            clipboard: ClipboardProvider::new().unwrap(),
         }
     }
 }
@@ -134,7 +139,7 @@ impl View {
                 filename,
                 saved,
                 self.cursor_position.height.saturating_add(1),
-                self.buffer.text.len()
+                self.buffer.len()
             )
         } else {
             format!("Filename: {} | Status: {} | Line: -", filename, saved)
@@ -190,7 +195,7 @@ impl View {
                 Direction::Down => {
                     self.cursor_position.height = min(
                         self.cursor_position.height.saturating_add(1),
-                        self.buffer.text.len().saturating_sub(1),
+                        self.buffer.len().saturating_sub(1),
                     );
                     self.cursor_position.width = min(
                         self.cursor_position.width,
@@ -245,7 +250,7 @@ impl View {
                         .expect("Out of bounds error")
                         .grapheme_len();
 
-                    let text_height = self.buffer.text.len().saturating_sub(1);
+                    let text_height = self.buffer.len().saturating_sub(1);
 
                     if (self.cursor_position.width == grapheme_len)
                         & (self.cursor_position.height < text_height)
@@ -260,7 +265,7 @@ impl View {
                 }
                 //move to last line, cursor width will stay the same
                 Direction::PageDown => {
-                    self.cursor_position.height = self.buffer.text.len().saturating_sub(1);
+                    self.cursor_position.height = self.buffer.len().saturating_sub(1);
                     snap = true;
                 }
                 //move to the first line, cursor width stays the same
@@ -297,13 +302,9 @@ impl View {
     }
 
     fn insert_char(&mut self, insert_char: char) {
-        let new_char_width = self.buffer.update_line_insert(
-            self.cursor_position.height,
-            self.cursor_position.width,
-            insert_char,
-        );
+        self.buffer
+            .update_line_insert(&mut self.cursor_position, insert_char);
 
-        self.cursor_position.width = self.cursor_position.width.saturating_add(new_char_width);
         self.buffer.is_saved = false;
     }
 
@@ -402,6 +403,21 @@ impl View {
             }
             EditorCommand::Theme => {
                 self.theme.set_theme();
+            }
+            EditorCommand::Paste => {
+                //buffer method to add text to the buffer
+                let paste_text = self.clipboard.get_contents().unwrap();
+                self.buffer
+                    .add_text_from_clipboard(paste_text, &mut self.cursor_position);
+            }
+            EditorCommand::Highlight => {
+                Highlight::highlight_text(
+                    &mut self.clipboard,
+                    &self.buffer,
+                    &self.cursor_position,
+                    self.theme.search_highlight,
+                    self.theme.search_text,
+                );
             }
             EditorCommand::Search => {
                 if self.help_indicator.render_help {
@@ -520,7 +536,7 @@ impl View {
                         }
                         KeyCode::Enter => {
                             // if line > buffer.len(), give buffer len
-                            if line < self.buffer.text.len() {
+                            if line < self.buffer.len() {
                                 self.cursor_position.height = line.saturating_sub(1);
                             } else {
                                 self.move_cursor(Direction::PageDown);

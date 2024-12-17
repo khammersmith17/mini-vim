@@ -39,6 +39,7 @@ impl Terminal {
     pub fn terminate() -> Result<(), Error> {
         Self::leave_alternate_screen()?;
         Self::show_cursor()?;
+        Self::set_cursor_style(SetCursorStyle::DefaultUserShape)?;
         Self::execute()?;
         disable_raw_mode()?;
         Ok(())

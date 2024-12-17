@@ -16,6 +16,33 @@ impl Buffer {
         self.text.is_empty()
     }
 
+    pub fn len(&self) -> usize {
+        self.text.len()
+    }
+
+    pub fn add_text_from_clipboard(&mut self, paste_text: String, pos: &mut Position) {
+        let mut buff_len = if !self.is_empty() {
+            self.text.len() - 1
+        } else {
+            0
+        };
+        for (i, line_str) in paste_text.lines().enumerate() {
+            if i != 0 {
+                pos.height += 1;
+                pos.width = 0;
+            }
+
+            if pos.height > buff_len {
+                self.text.push(Line::from(line_str));
+                buff_len += 1;
+                continue;
+            }
+            for c in line_str.chars() {
+                self.update_line_insert(pos, c);
+            }
+        }
+    }
+
     pub fn load(filename: &str) -> Result<Buffer, Error> {
         let file_contents = read_to_string(filename)?;
         let mut text = Vec::new();
@@ -171,12 +198,7 @@ impl Buffer {
             .generate_raw_string();
     }
 
-    pub fn update_line_insert(
-        &mut self,
-        line_index: usize,
-        width_index: usize,
-        insert_char: char,
-    ) -> usize {
+    pub fn update_line_insert(&mut self, pos: &mut Position, insert_char: char) {
         //take current vec<TextFragment> at height
         //insert new char
         //generate a new vec<TextFragment from new string
@@ -190,19 +212,19 @@ impl Buffer {
         };
         if !self.is_empty() {
             self.text
-                .get_mut(line_index)
+                .get_mut(pos.height)
                 .expect("Error getting mut line")
                 .string
-                .insert(width_index, new_fragment);
+                .insert(pos.width, new_fragment);
         } else {
             self.text.push(Line::from(insert_char.to_string().as_str()));
         }
         self.text
-            .get_mut(line_index)
+            .get_mut(pos.height)
             .expect("Out of bounds error")
             .generate_raw_string();
         self.is_saved = false;
-        move_width
+        pos.width += move_width;
     }
 
     pub fn update_line_delete(&mut self, line_index: usize, width_index: usize) -> usize {
