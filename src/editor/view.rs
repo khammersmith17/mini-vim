@@ -14,7 +14,7 @@ use search::Search;
 pub mod help;
 use help::Help;
 mod highlight;
-use highlight::Highlight;
+use highlight::{Highlight, HighlightOp};
 
 const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
 const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -29,6 +29,7 @@ pub struct View {
     search: Search,
     theme: Theme,
     clipboard: ClipboardContext,
+    highlight: Highlight,
 }
 
 impl Default for View {
@@ -43,6 +44,7 @@ impl Default for View {
             search: Search::default(),
             theme: Theme::default(),
             clipboard: ClipboardProvider::new().unwrap(),
+            highlight: Highlight::default(),
         }
     }
 }
@@ -70,6 +72,16 @@ impl View {
                     &self.size,
                     self.theme.search_highlight,
                     self.theme.search_text,
+                );
+                continue;
+            }
+            if self.highlight.render & self.highlight.map.contains_key(&current_row) {
+                self.highlight.render_highlight_line(
+                    &self.buffer.text[current_row].raw_string,
+                    current_row,
+                    self.screen_offset.width..self.screen_offset.width + self.size.width,
+                    self.theme.search_highlight.clone(),
+                    self.theme.search_text.clone(),
                 );
                 continue;
             }
@@ -309,16 +321,13 @@ impl View {
     }
 
     fn insert_tab(&mut self) {
-        self.buffer
-            .insert_tab(self.cursor_position.height, self.cursor_position.width);
+        self.buffer.insert_tab(&self.cursor_position);
         self.cursor_position.width = self.cursor_position.width.saturating_add(4);
     }
 
     fn delete_char(&mut self) {
         //get the width of the char being deleted to update the cursor position
-        let removed_char_width = self
-            .buffer
-            .update_line_delete(self.cursor_position.height, self.cursor_position.width);
+        let removed_char_width = self.buffer.update_line_delete(&self.cursor_position);
 
         self.cursor_position.width = self
             .cursor_position
@@ -411,13 +420,8 @@ impl View {
                     .add_text_from_clipboard(paste_text, &mut self.cursor_position);
             }
             EditorCommand::Highlight => {
-                Highlight::highlight_text(
-                    &mut self.clipboard,
-                    &self.buffer,
-                    &self.cursor_position,
-                    self.theme.search_highlight,
-                    self.theme.search_text,
-                );
+                self.highlight.render = true;
+                self.handle_highlight();
             }
             EditorCommand::Search => {
                 if self.help_indicator.render_help {
@@ -473,12 +477,15 @@ impl View {
                 };
             }
             EditorCommand::NewLine => {
-                let grapheme_len = self
-                    .buffer
-                    .text
-                    .get(self.cursor_position.height)
-                    .expect("Out of bounds error")
-                    .grapheme_len();
+                let grapheme_len = if !self.buffer.is_empty() {
+                    self.buffer
+                        .text
+                        .get(self.cursor_position.height)
+                        .expect("Out of bounds error")
+                        .grapheme_len()
+                } else {
+                    0
+                };
 
                 if self.cursor_position.width == grapheme_len {
                     self.buffer.new_line(self.cursor_position.height);
@@ -488,7 +495,10 @@ impl View {
                 }
 
                 self.cursor_position.height = self.cursor_position.height.saturating_add(1);
-                self.cursor_position.width = if self.buffer.is_tab(self.cursor_position.height, 4) {
+                self.cursor_position.width = if self.buffer.is_tab(&Position {
+                    height: self.cursor_position.height,
+                    width: 4,
+                }) {
                     4
                 } else {
                     0
@@ -505,13 +515,6 @@ impl View {
     }
 
     fn jump_cursor(&mut self) {
-        // TODO:
-        // render the user input at line -2
-        // to do this, clear -2 line, render int
-        // read in only ints
-        // when user hits enter, assume position
-        // if number > buffer length, assume buffer.len()
-        // adjust offset after assuming the new position
         let neg_2 = self.size.height.saturating_sub(2);
         let render_string: String = "Jump to: ".into();
         let mut line = 0_usize;
@@ -727,6 +730,10 @@ impl View {
                             }
                             _ => {}
                         },
+                        Event::Resize(width_u16, height_u16) => self.resize(Size {
+                            height: height_u16 as usize,
+                            width: width_u16 as usize,
+                        }),
                         _ => {
                             //not addressing other events
                         }
@@ -804,5 +811,109 @@ impl View {
             Direction::Left => self.buffer.find_prev_word(&mut self.cursor_position),
             _ => {} //direction should only be left or right at this point
         };
+    }
+
+    fn handle_highlight(&mut self) {
+        let mut end = self.cursor_position.clone();
+        let max_height = self.buffer.len() - 1;
+
+        loop {
+            match read() {
+                Ok(event) => match event {
+                    Event::Key(KeyEvent {
+                        code, modifiers, ..
+                    }) => match (code, modifiers) {
+                        (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+                            self.highlight.render = false;
+                            break;
+                        }
+                        (KeyCode::Right, _) => {
+                            if end.width
+                                == self.buffer.text[end.height]
+                                    .grapheme_len()
+                                    .saturating_sub(1)
+                            {
+                                end.height = std::cmp::min(end.height + 1, max_height);
+                                end.width = 0;
+                                self.highlight.update_map(&end, HighlightOp::OverflowRight);
+                            } else {
+                                end.width += 1;
+                                self.highlight.update_map(&end, HighlightOp::Right);
+                            }
+                        }
+                        (KeyCode::Left, _) => {
+                            if end.width == 0 {
+                                end.height = end.height.saturating_sub(1);
+                                end.width = self.buffer.text[end.height]
+                                    .grapheme_len()
+                                    .saturating_sub(1);
+                                self.highlight.update_map(&end, HighlightOp::OverflowLeft);
+                            } else {
+                                end.width -= 1;
+                                self.highlight.update_map(&end, HighlightOp::Left);
+                            }
+                        }
+                        (KeyCode::Down, _) => {
+                            if end.height == self.buffer.len() {
+                                continue;
+                            }
+                            end.height += 1;
+                            end.width = std::cmp::min(
+                                end.width,
+                                self.buffer.text[end.height]
+                                    .grapheme_len()
+                                    .saturating_sub(1),
+                            );
+                            self.highlight.update_map(&end, HighlightOp::Down);
+                        }
+                        (KeyCode::Up, _) => {
+                            if end.height == 0 {
+                                continue;
+                            }
+                            end.height = end.height.saturating_sub(1);
+                            end.width = std::cmp::min(
+                                end.width,
+                                self.buffer.text[end.height]
+                                    .grapheme_len()
+                                    .saturating_sub(1),
+                            );
+                            self.highlight.update_map(&end, HighlightOp::Up);
+                        }
+                        (KeyCode::Esc, _) => {
+                            self.highlight.render = false;
+                            return;
+                        }
+                        _ => {}
+                    },
+                    Event::Resize(width_u16, height_u16) => self.resize(Size {
+                        height: height_u16 as usize,
+                        width: width_u16 as usize,
+                    }),
+                    _ => {}
+                },
+                _ => {}
+            }
+            //TODO:
+            //save these in a hashmap pick from the hashmap in highlight
+            //render the screen every move
+            //self.highlight.update_map();
+            self.highlight
+                .resolve_orientation(&self.cursor_position, &end);
+            Terminal::hide_cursor().unwrap();
+            self.render();
+            Terminal::move_cursor_to(end).unwrap();
+            Terminal::show_cursor().unwrap();
+            Terminal::execute().unwrap();
+        }
+
+        let copy_string = if end.height > self.cursor_position.height {
+            Highlight::generate_copy_str(&self.buffer, &self.cursor_position, &end)
+        } else {
+            Highlight::generate_copy_str(&self.buffer, &end, &self.cursor_position)
+        };
+        if copy_string.is_empty() {
+            return;
+        }
+        Highlight::copy_text_to_clipboard(&mut self.clipboard, copy_string);
     }
 }

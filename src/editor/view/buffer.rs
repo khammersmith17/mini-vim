@@ -175,7 +175,7 @@ impl Buffer {
         self.is_saved = true;
     }
 
-    pub fn insert_tab(&mut self, line_index: usize, width_index: usize) {
+    pub fn insert_tab(&mut self, pos: &Position) {
         if self.is_empty() {
             let new_line = Line {
                 string: Vec::new(),
@@ -184,16 +184,16 @@ impl Buffer {
             self.text.push(new_line);
         }
 
-        for _ in width_index..width_index.saturating_add(4) {
+        for _ in pos.width..pos.width.saturating_add(4) {
             self.text
-                .get_mut(line_index)
+                .get_mut(pos.height)
                 .expect("Out of bounds")
                 .string
                 .push(TextFragment::try_from(" ").expect("Error generating new fragment"));
         }
 
         self.text
-            .get_mut(line_index)
+            .get_mut(pos.height)
             .expect("Out of bounds error")
             .generate_raw_string();
     }
@@ -227,13 +227,13 @@ impl Buffer {
         pos.width += move_width;
     }
 
-    pub fn update_line_delete(&mut self, line_index: usize, width_index: usize) -> usize {
+    pub fn update_line_delete(&mut self, pos: &Position) -> usize {
         // pop out the char we want to removed
         // return the render_width of that char
-        if self.is_tab(line_index, width_index) {
-            for i in (width_index.saturating_sub(4)..width_index).rev() {
+        if self.is_tab(pos) {
+            for i in (pos.width.saturating_sub(4)..pos.width).rev() {
                 self.text
-                    .get_mut(line_index)
+                    .get_mut(pos.height)
                     .expect("Out of bounds error")
                     .string
                     .remove(i);
@@ -242,12 +242,12 @@ impl Buffer {
         }
         let removed_char = self
             .text
-            .get_mut(line_index)
+            .get_mut(pos.height)
             .expect("Out of bounds error")
             .string
-            .remove(width_index.saturating_sub(1));
+            .remove(pos.width.saturating_sub(1));
         self.text
-            .get_mut(line_index)
+            .get_mut(pos.height)
             .expect("Out of bounds error")
             .generate_raw_string();
         self.is_saved = false;
@@ -257,27 +257,37 @@ impl Buffer {
         }
     }
 
-    pub fn is_tab(&self, line_index: usize, width_index: usize) -> bool {
-        if width_index < 4 {
+    pub fn is_tab(&self, pos: &Position) -> bool {
+        if pos.width < 4 {
             return false;
         }
         let fragments_to_check = &self
             .text
-            .get(line_index)
+            .get(pos.height)
             .expect("Out of bounds")
             .string
-            .get(width_index.saturating_sub(4)..width_index)
-            .expect("Out of bounds error");
-        for fragment in fragments_to_check.iter().rev() {
-            if fragment.grapheme != " ".to_string() {
-                return false;
+            .get(pos.width.saturating_sub(4)..pos.width);
+        match fragments_to_check {
+            Some(frags) => {
+                for fragment in frags.iter().rev() {
+                    if fragment.grapheme != " ".to_string() {
+                        return false;
+                    }
+                }
             }
+            None => return false,
         }
 
         return true;
     }
 
     pub fn new_line(&mut self, line_index: usize) {
+        if self.is_empty() {
+            self.text.push(Line {
+                string: Vec::new(),
+                raw_string: String::new(),
+            });
+        }
         self.text.insert(
             line_index.saturating_add(1),
             Line {
@@ -286,8 +296,14 @@ impl Buffer {
             },
         );
 
-        if self.is_tab(line_index, 4) {
-            self.insert_tab(line_index.saturating_add(1), 0);
+        if self.is_tab(&Position {
+            height: line_index,
+            width: 4,
+        }) {
+            self.insert_tab(&Position {
+                height: line_index.saturating_add(1),
+                width: 0,
+            });
         }
 
         self.is_saved = false;
