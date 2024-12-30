@@ -13,11 +13,31 @@ pub struct Size {
     pub width: usize,
 }
 
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, PartialEq)]
 pub struct Position {
     pub width: usize,
     pub height: usize,
 }
+
+/*
+impl Position {
+    pub fn height_in_view(&self, offset: &Position, size: &Size) -> bool {
+        if (self.height < offset.height) | (self.height > offset.height + size.height) {
+            return false;
+        }
+
+        return true;
+    }
+
+    pub fn width_in_view(&self, offset: &Position, size: &Size) -> bool {
+        if (self.width < offset.width) | (self.width > offset.width + size.width) {
+            return false;
+        }
+
+        return true;
+    }
+}
+*/
 
 #[derive(Copy, Clone, Default)]
 pub struct Location {

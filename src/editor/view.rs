@@ -1,6 +1,7 @@
 use super::terminal::{Position, Size, Terminal};
 use clipboard::{ClipboardContext, ClipboardProvider};
 use crossterm::event::{read, Event, KeyCode, KeyEvent, KeyModifiers};
+use std::ops::RangeInclusive;
 use std::time::Instant;
 mod buffer;
 use super::editorcommands::{Direction, EditorCommand};
@@ -14,7 +15,7 @@ use search::Search;
 pub mod help;
 use help::Help;
 mod highlight;
-use highlight::{Highlight, HighlightOp};
+use highlight::{Highlight, HighlightLineType, HighlightOrientation};
 
 const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
 const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -59,6 +60,7 @@ impl View {
         } else {
             1
         };
+
         #[allow(clippy::integer_division)]
         for current_row in
             self.screen_offset.height..self.screen_offset.height + self.size.height - screen_cut
@@ -75,16 +77,13 @@ impl View {
                 );
                 continue;
             }
-            if self.highlight.render & self.highlight.map.contains_key(&current_row) {
-                self.highlight.render_highlight_line(
-                    &self.buffer.text[current_row].raw_string,
-                    current_row,
-                    self.screen_offset.width..self.screen_offset.width + self.size.width,
-                    self.theme.search_highlight.clone(),
-                    self.theme.search_text.clone(),
-                );
+
+            if self.highlight.render & self.highlight.line_range.contains(&current_row) {
+                // going to handle rendering these lines with the highlight range
+                // want to skip this so we do not render twice
                 continue;
             }
+
             if let Some(line) = self.buffer.text.get(current_row) {
                 self.render_line(
                     relative_row,
@@ -99,12 +98,15 @@ impl View {
                 self.render_line(relative_row, "~");
             }
         }
+
         if self.search.render_search {
             self.search.render_search_string(&self.size);
         }
+
         if self.help_indicator.render_help {
             self.render_help_line(self.size.height, self.size.width);
         }
+
         self.render_file_info(
             self.cursor_position.height - self.screen_offset.height + self.size.height,
         );
@@ -828,29 +830,26 @@ impl View {
                             break;
                         }
                         (KeyCode::Right, _) => {
-                            if end.width
+                            if (end.width
                                 == self.buffer.text[end.height]
                                     .grapheme_len()
-                                    .saturating_sub(1)
+                                    .saturating_sub(1))
+                                & (end.height < self.buffer.len())
                             {
                                 end.height = std::cmp::min(end.height + 1, max_height);
                                 end.width = 0;
-                                self.highlight.update_map(&end, HighlightOp::OverflowRight);
                             } else {
                                 end.width += 1;
-                                self.highlight.update_map(&end, HighlightOp::Right);
                             }
                         }
                         (KeyCode::Left, _) => {
-                            if end.width == 0 {
-                                end.height = end.height.saturating_sub(1);
+                            if (end.width == 0) & (end.height > 0) {
+                                end.height -= 1;
                                 end.width = self.buffer.text[end.height]
                                     .grapheme_len()
                                     .saturating_sub(1);
-                                self.highlight.update_map(&end, HighlightOp::OverflowLeft);
                             } else {
-                                end.width -= 1;
-                                self.highlight.update_map(&end, HighlightOp::Left);
+                                end.width = end.width.saturating_sub(1);
                             }
                         }
                         (KeyCode::Down, _) => {
@@ -864,7 +863,6 @@ impl View {
                                     .grapheme_len()
                                     .saturating_sub(1),
                             );
-                            self.highlight.update_map(&end, HighlightOp::Down);
                         }
                         (KeyCode::Up, _) => {
                             if end.height == 0 {
@@ -877,7 +875,6 @@ impl View {
                                     .grapheme_len()
                                     .saturating_sub(1),
                             );
-                            self.highlight.update_map(&end, HighlightOp::Up);
                         }
                         (KeyCode::Esc, _) => {
                             self.highlight.render = false;
@@ -893,14 +890,47 @@ impl View {
                 },
                 _ => {}
             }
-            //TODO:
-            //save these in a hashmap pick from the hashmap in highlight
-            //render the screen every move
-            //self.highlight.update_map();
+            self.update_offset_single_move();
             self.highlight
                 .resolve_orientation(&self.cursor_position, &end);
+            self.highlight.adjust_range(&self.cursor_position, &end);
             Terminal::hide_cursor().unwrap();
             self.render();
+            if self.cursor_position.height == end.height {
+                let h_r = match self.highlight.or {
+                    HighlightOrientation::EndFirst => end.width..=self.cursor_position.width,
+                    HighlightOrientation::StartFirst => self.cursor_position.width..=end.width,
+                };
+
+                // cond for is the highlight ends at the end of the line
+                let te = self.buffer.text[self.cursor_position.height]
+                    .raw_string
+                    .len()
+                    - 1
+                    == *h_r.end();
+                // cond for if the highlight starts at pos 0
+                let ts = *h_r.start() == 0;
+
+                // determine how the single line needs to be highlighted
+                let h_t = match (te, ts) {
+                    (true, true) => HighlightLineType::All,
+                    (true, false) => HighlightLineType::Trailing,
+                    (false, true) => HighlightLineType::Leading,
+                    (false, false) => HighlightLineType::Middle,
+                };
+
+                Highlight::render_highlight_line(
+                    &self.buffer.text[self.cursor_position.height].raw_string,
+                    self.cursor_position.height,
+                    h_r,
+                    h_t,
+                    self.theme.search_highlight.clone(),
+                    self.theme.search_text.clone(),
+                );
+            } else {
+                self.multiline_highlight(&end);
+            }
+
             Terminal::move_cursor_to(end).unwrap();
             Terminal::show_cursor().unwrap();
             Terminal::execute().unwrap();
@@ -915,5 +945,100 @@ impl View {
             return;
         }
         Highlight::copy_text_to_clipboard(&mut self.clipboard, copy_string);
+    }
+
+    fn multiline_highlight(&self, end: &Position) {
+        // to check visibility of the line
+        let visible_height_range = RangeInclusive::new(
+            self.screen_offset.height,
+            self.screen_offset.height + self.size.height,
+        );
+        let visible_width_range = RangeInclusive::new(
+            self.screen_offset.width,
+            self.screen_offset.width + self.size.width,
+        );
+
+        for line_height in self.highlight.line_range.clone() {
+            // if line height not on the current screen view
+            if !visible_height_range.contains(&line_height) {
+                continue;
+            }
+
+            let line_text = &self.buffer.text[line_height].raw_string;
+            // if line width not on screen
+            if line_text.len().saturating_sub(1) < *visible_width_range.start() {
+                continue;
+            }
+
+            // get the visible portion of the line
+            let visible_line = match line_text.get(
+                *visible_width_range.start()
+                    ..=std::cmp::min(
+                        *visible_width_range.end(),
+                        line_text.len().saturating_sub(1),
+                    ),
+            ) {
+                Some(text) => text,
+                None => continue,
+            };
+
+            // when the line is the start
+            // need to handle a partial line highlight
+            if line_height == self.cursor_position.height {
+                match self.highlight.or {
+                    HighlightOrientation::StartFirst => Highlight::render_highlight_line(
+                        visible_line,
+                        line_height.saturating_sub(self.screen_offset.height),
+                        self.cursor_position.width..=visible_line.len() - 1,
+                        HighlightLineType::Trailing,
+                        self.theme.search_highlight.clone(),
+                        self.theme.search_text.clone(),
+                    ),
+                    HighlightOrientation::EndFirst => Highlight::render_highlight_line(
+                        visible_line,
+                        line_height.saturating_sub(self.screen_offset.height),
+                        0..=self.cursor_position.width,
+                        HighlightLineType::Leading,
+                        self.theme.search_highlight.clone(),
+                        self.theme.search_text.clone(),
+                    ),
+                }
+                continue;
+            }
+
+            // when the line is the end
+            // need to handle a partial line highlight
+            if line_height == end.height {
+                match self.highlight.or {
+                    HighlightOrientation::StartFirst => Highlight::render_highlight_line(
+                        visible_line,
+                        line_height.saturating_sub(self.screen_offset.height),
+                        0..=end.width,
+                        HighlightLineType::Leading,
+                        self.theme.search_highlight.clone(),
+                        self.theme.search_text.clone(),
+                    ),
+                    HighlightOrientation::EndFirst => Highlight::render_highlight_line(
+                        visible_line,
+                        line_height.saturating_sub(self.screen_offset.height),
+                        end.width..=visible_line.len() - 1,
+                        HighlightLineType::Trailing,
+                        self.theme.search_highlight.clone(),
+                        self.theme.search_text.clone(),
+                    ),
+                }
+                continue;
+            }
+
+            // if we get here, we are highlighting the whole line
+            Highlight::render_highlight_line(
+                visible_line,
+                line_height.saturating_sub(self.screen_offset.height),
+                0..=visible_line.len() - 1,
+                HighlightLineType::All,
+                self.theme.search_highlight.clone(),
+                self.theme.search_text.clone(),
+            )
+        }
     }
 }
