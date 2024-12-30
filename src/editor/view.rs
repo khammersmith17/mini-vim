@@ -20,6 +20,7 @@ use highlight::{Highlight, HighlightLineType, HighlightOrientation};
 const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
 const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
 
+/// the core logic
 pub struct View {
     pub buffer: Buffer,
     pub needs_redraw: bool,
@@ -107,9 +108,18 @@ impl View {
             self.render_help_line(self.size.height, self.size.width);
         }
 
-        self.render_file_info(
-            self.cursor_position.height - self.screen_offset.height + self.size.height,
-        );
+        // TODO:
+        // when in highlight mode consider end
+        // when in normal mode consider the position
+        if self.highlight.render {
+            self.render_file_info(
+                self.highlight.end.height - self.screen_offset.height + self.size.height,
+            );
+        } else {
+            self.render_file_info(
+                self.cursor_position.height - self.screen_offset.height + self.size.height,
+            );
+        }
 
         self.needs_redraw = false;
     }
@@ -416,7 +426,6 @@ impl View {
                 self.theme.set_theme();
             }
             EditorCommand::Paste => {
-                //buffer method to add text to the buffer
                 let paste_text = self.clipboard.get_contents().unwrap();
                 self.buffer
                     .add_text_from_clipboard(paste_text, &mut self.cursor_position);
@@ -439,7 +448,6 @@ impl View {
             EditorCommand::Tab => self.insert_tab(),
             EditorCommand::JumpLine => self.jump_cursor(),
             EditorCommand::Delete => {
-                //todo add logic for when a line is empty
                 match self.cursor_position.width {
                     0 => {
                         if self.cursor_position.height == 0 {
@@ -525,7 +533,8 @@ impl View {
             width: 0,
         })
         .expect("Error moving cursor");
-        let _ = Terminal::render_line(neg_2, format!("{}", render_string));
+        Terminal::render_line(neg_2, format!("{}", render_string)).unwrap();
+        Terminal::execute().unwrap();
 
         loop {
             match read() {
@@ -638,8 +647,7 @@ impl View {
         if self.cursor_position.width < self.screen_offset.width {
             self.screen_offset.width = self.cursor_position.width;
         }
-        // if new position is greater than offset, offset gets current_width - screen width
-        // this better handles snapping the cursor to the end of the line
+        //if width moves outside view by 1 increment
         if self.cursor_position.width >= self.size.width + self.screen_offset.width {
             //self.screen_offset.width = self.screen_offset.width.saturating_sub(1);
             self.screen_offset.width = self.screen_offset.width.saturating_add(1);
@@ -653,7 +661,8 @@ impl View {
         self.search.string.clear();
         self.search.search_index = 0;
 
-        // keep a stack of search positions so we only need to compute the positions when the user
+        // keep a stack of search positions so
+        // we only need to compute the positions when the user
         // adds to a search string
         // when the user removes from the search string
         // we pop the stack
@@ -795,6 +804,7 @@ impl View {
         Terminal::move_cursor_to(self.screen_offset).unwrap();
         Terminal::clear_screen().unwrap();
         self.render();
+        /*
         Terminal::move_cursor_to(Position {
             height: self
                 .cursor_position
@@ -803,6 +813,9 @@ impl View {
             width: self.cursor_position.width,
         })
         .unwrap();
+        */
+        Terminal::move_cursor_to(self.cursor_position.sub_height(self.screen_offset.height))
+            .unwrap();
         Terminal::show_cursor().unwrap();
         Terminal::execute().unwrap();
     }
@@ -816,8 +829,13 @@ impl View {
     }
 
     fn handle_highlight(&mut self) {
-        let mut end = self.cursor_position.clone();
-        let max_height = self.buffer.len() - 1;
+        //if buffer is empty -> nothing to highlight
+        if self.buffer.is_empty() {
+            return;
+        }
+        self.highlight.end = self.cursor_position.clone();
+        let max_height = self.buffer.len().saturating_sub(1);
+        let previous_offset = self.screen_offset;
 
         loop {
             match read() {
@@ -830,53 +848,57 @@ impl View {
                             break;
                         }
                         (KeyCode::Right, _) => {
-                            if (end.width
-                                == self.buffer.text[end.height]
+                            if (self.highlight.end.width
+                                == self.buffer.text[self.highlight.end.height]
                                     .grapheme_len()
                                     .saturating_sub(1))
-                                & (end.height < self.buffer.len())
+                                & (self.highlight.end.height < max_height)
                             {
-                                end.height = std::cmp::min(end.height + 1, max_height);
-                                end.width = 0;
-                            } else {
-                                end.width += 1;
+                                self.highlight.end.height =
+                                    std::cmp::min(self.highlight.end.height + 1, max_height);
+                                self.highlight.end.width = 0;
+                            } else if self.highlight.end.height != max_height {
+                                self.highlight.end.width += 1;
                             }
                         }
                         (KeyCode::Left, _) => {
-                            if (end.width == 0) & (end.height > 0) {
-                                end.height -= 1;
-                                end.width = self.buffer.text[end.height]
+                            if (self.highlight.end.width == 0) & (self.highlight.end.height > 0) {
+                                self.highlight.end.height -= 1;
+                                self.highlight.end.width = self.buffer.text
+                                    [self.highlight.end.height]
                                     .grapheme_len()
                                     .saturating_sub(1);
                             } else {
-                                end.width = end.width.saturating_sub(1);
+                                self.highlight.end.width =
+                                    self.highlight.end.width.saturating_sub(1);
                             }
                         }
                         (KeyCode::Down, _) => {
-                            if end.height == self.buffer.len() {
+                            if self.highlight.end.height == max_height {
                                 continue;
                             }
-                            end.height += 1;
-                            end.width = std::cmp::min(
-                                end.width,
-                                self.buffer.text[end.height]
+                            self.highlight.end.height += 1;
+                            self.highlight.end.width = std::cmp::min(
+                                self.highlight.end.width,
+                                self.buffer.text[self.highlight.end.height]
                                     .grapheme_len()
                                     .saturating_sub(1),
                             );
                         }
                         (KeyCode::Up, _) => {
-                            if end.height == 0 {
+                            if self.highlight.end.height == 0 {
                                 continue;
                             }
-                            end.height = end.height.saturating_sub(1);
-                            end.width = std::cmp::min(
-                                end.width,
-                                self.buffer.text[end.height]
+                            self.highlight.end.height = self.highlight.end.height.saturating_sub(1);
+                            self.highlight.end.width = std::cmp::min(
+                                self.highlight.end.width,
+                                self.buffer.text[self.highlight.end.height]
                                     .grapheme_len()
                                     .saturating_sub(1),
                             );
                         }
                         (KeyCode::Esc, _) => {
+                            self.screen_offset = previous_offset;
                             self.highlight.render = false;
                             return;
                         }
@@ -890,16 +912,28 @@ impl View {
                 },
                 _ => {}
             }
-            self.update_offset_single_move();
+
+            // TODO:
+            // instead of updating offset based on
+            // self cursor position
+            // need to update based on end
+            // so logic should be duplicated
             self.highlight
-                .resolve_orientation(&self.cursor_position, &end);
-            self.highlight.adjust_range(&self.cursor_position, &end);
+                .update_offset(&mut self.screen_offset, &self.size);
+            self.highlight.resolve_orientation(&self.cursor_position);
+            self.highlight.adjust_range(&self.cursor_position);
             Terminal::hide_cursor().unwrap();
+            Terminal::clear_screen().unwrap();
             self.render();
-            if self.cursor_position.height == end.height {
+
+            if self.cursor_position.height == self.highlight.end.height {
                 let h_r = match self.highlight.or {
-                    HighlightOrientation::EndFirst => end.width..=self.cursor_position.width,
-                    HighlightOrientation::StartFirst => self.cursor_position.width..=end.width,
+                    HighlightOrientation::EndFirst => {
+                        self.highlight.end.width..=self.cursor_position.width
+                    }
+                    HighlightOrientation::StartFirst => {
+                        self.cursor_position.width..=self.highlight.end.width
+                    }
                 };
 
                 // cond for is the highlight ends at the end of the line
@@ -928,26 +962,29 @@ impl View {
                     self.theme.search_text.clone(),
                 );
             } else {
-                self.multiline_highlight(&end);
+                self.multiline_highlight();
             }
 
-            Terminal::move_cursor_to(end).unwrap();
+            Terminal::move_cursor_to(self.highlight.end.sub_height(self.screen_offset.height))
+                .unwrap();
             Terminal::show_cursor().unwrap();
             Terminal::execute().unwrap();
         }
 
-        let copy_string = if end.height > self.cursor_position.height {
-            Highlight::generate_copy_str(&self.buffer, &self.cursor_position, &end)
+        let copy_string = if self.highlight.end.height > self.cursor_position.height {
+            self.highlight
+                .generate_copy_str(&self.buffer, &self.cursor_position)
         } else {
-            Highlight::generate_copy_str(&self.buffer, &end, &self.cursor_position)
+            self.highlight
+                .generate_copy_str(&self.buffer, &self.cursor_position)
         };
         if copy_string.is_empty() {
             return;
         }
-        Highlight::copy_text_to_clipboard(&mut self.clipboard, copy_string);
+        self.copy_text_to_clipboard(copy_string);
     }
 
-    fn multiline_highlight(&self, end: &Position) {
+    fn multiline_highlight(&self) {
         // to check visibility of the line
         let visible_height_range = RangeInclusive::new(
             self.screen_offset.height,
@@ -1008,12 +1045,12 @@ impl View {
 
             // when the line is the end
             // need to handle a partial line highlight
-            if line_height == end.height {
+            if line_height == self.highlight.end.height {
                 match self.highlight.or {
                     HighlightOrientation::StartFirst => Highlight::render_highlight_line(
                         visible_line,
                         line_height.saturating_sub(self.screen_offset.height),
-                        0..=end.width,
+                        0..=self.highlight.end.width,
                         HighlightLineType::Leading,
                         self.theme.search_highlight.clone(),
                         self.theme.search_text.clone(),
@@ -1021,7 +1058,7 @@ impl View {
                     HighlightOrientation::EndFirst => Highlight::render_highlight_line(
                         visible_line,
                         line_height.saturating_sub(self.screen_offset.height),
-                        end.width..=visible_line.len() - 1,
+                        self.highlight.end.width..=visible_line.len() - 1,
                         HighlightLineType::Trailing,
                         self.theme.search_highlight.clone(),
                         self.theme.search_text.clone(),
@@ -1040,5 +1077,9 @@ impl View {
                 self.theme.search_text.clone(),
             )
         }
+    }
+
+    fn copy_text_to_clipboard(&mut self, content: String) {
+        self.clipboard.set_contents(content).unwrap();
     }
 }

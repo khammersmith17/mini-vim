@@ -19,6 +19,24 @@ pub struct Position {
     pub height: usize,
 }
 
+impl Position {
+    /*
+    pub fn sub_width(&self, diff: usize) -> Position {
+        Position {
+            height: self.height,
+            width: self.width.saturating_sub(diff),
+        }
+    }
+    */
+
+    pub fn sub_height(&self, diff: usize) -> Position {
+        Position {
+            height: self.height.saturating_sub(diff),
+            width: self.width,
+        }
+    }
+}
+
 /*
 impl Position {
     pub fn height_in_view(&self, offset: &Position, size: &Size) -> bool {

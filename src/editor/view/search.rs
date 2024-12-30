@@ -56,8 +56,9 @@ impl Search {
         let mut m = (r - l) / 2 + l;
         while l < r {
             if (current_positions[m].height == *curr_height)
-                | ((current_positions[m - 1].height < *curr_height)
-                    & (current_positions[m + 1].height > *curr_height))
+                | ((current_positions[m.saturating_sub(1)].height < *curr_height)
+                    & (current_positions[min(m + 1, current_positions.len() - 1)].height
+                        > *curr_height))
             {
                 match Self::resolve_closest(
                     *curr_height,
@@ -70,7 +71,7 @@ impl Search {
                     SearchResolver::Right => return Some(m + 1),
                 }
             } else if current_positions[m].height > *curr_height {
-                r = m - 1;
+                r = m.saturating_sub(1);
             } else {
                 l = m + 1;
             }

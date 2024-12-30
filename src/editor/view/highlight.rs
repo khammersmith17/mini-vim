@@ -1,5 +1,7 @@
-use crate::editor::{view::Buffer, Position, Terminal};
-use clipboard::{ClipboardContext, ClipboardProvider};
+use crate::editor::{
+    terminal::{Position, Size, Terminal},
+    view::Buffer,
+};
 use crossterm::style::{Color, Print, PrintStyledContent, StyledContent, Stylize};
 use std::ops::RangeInclusive;
 
@@ -25,10 +27,14 @@ pub enum HighlightLineType {
 }
 
 /// type to handle the highlighting and copy logic
+// TODO:
+// add the end position of the highlight as a member
+// refactor the changes to update the member
 pub struct Highlight {
     pub render: bool,
     pub line_range: RangeInclusive<usize>,
     pub or: HighlightOrientation,
+    pub end: Position,
 }
 
 impl Default for Highlight {
@@ -37,55 +43,56 @@ impl Default for Highlight {
             render: false,
             line_range: 0..=0,
             or: HighlightOrientation::default(),
+            end: Position::default(),
         }
     }
 }
 
 impl Highlight {
-    pub fn adjust_range(&mut self, pos1: &Position, pos2: &Position) {
+    pub fn adjust_range(&mut self, pos1: &Position) {
         match self.or {
             HighlightOrientation::StartFirst => {
-                self.line_range = pos1.height..=pos2.height;
+                self.line_range = pos1.height..=self.end.height;
             }
             HighlightOrientation::EndFirst => {
-                self.line_range = pos2.height..=pos1.height;
+                self.line_range = self.end.height..=pos1.height;
             }
         }
     }
-    pub fn resolve_orientation(&mut self, pos1: &Position, pos2: &Position) {
-        if pos1.height == pos2.height {
-            if pos1.width <= pos2.width {
+    pub fn resolve_orientation(&mut self, pos1: &Position) {
+        if pos1.height == self.end.height {
+            if pos1.width <= self.end.width {
                 self.or = HighlightOrientation::StartFirst;
             } else {
                 self.or = HighlightOrientation::EndFirst;
             }
             return;
         }
-        if pos1.height < pos2.height {
+        if pos1.height < self.end.height {
             self.or = HighlightOrientation::StartFirst;
         } else {
             self.or = HighlightOrientation::EndFirst;
         }
     }
-    pub fn generate_copy_str(buffer: &Buffer, start: &Position, end: &Position) -> String {
+    pub fn generate_copy_str(&self, buffer: &Buffer, start: &Position) -> String {
         let mut copy_string = String::new();
-        if start.height == end.height {
+        if start.height == self.end.height {
             let line_len = buffer.text[start.height].raw_string.len() - 1;
             let line_string = &buffer.text[start.height].raw_string;
-            let slice: String = if end.width == line_len {
+            let slice: String = if self.end.width == line_len {
                 line_string[start.width..].to_string()
             } else {
-                line_string[start.width..end.width].to_string()
+                line_string[start.width..self.end.width].to_string()
             };
             copy_string.push_str(&slice);
         } else {
             copy_string.push_str(&buffer.text[start.height].raw_string[start.width..]);
             copy_string.push_str("\n");
-            for h in start.height + 1..end.height {
+            for h in start.height + 1..self.end.height {
                 copy_string.push_str(&buffer.text[h].raw_string);
                 copy_string.push_str("\n");
             }
-            copy_string.push_str(&buffer.text[end.height].raw_string[..end.width]);
+            copy_string.push_str(&buffer.text[self.end.height].raw_string[..self.end.width + 1]);
         }
         copy_string
     }
@@ -127,7 +134,34 @@ impl Highlight {
         }
     }
 
-    pub fn copy_text_to_clipboard(ctx: &mut ClipboardContext, content: String) {
-        ctx.set_contents(content).unwrap();
+    pub fn update_offset(&self, offset: &mut Position, size: &Size) {
+        // adding a method to handle the offset when
+        // the end goes off screen of the highlight
+        // block goes off screen
+        // taken from View::update_offset_single_move
+        // with different parameters to update the highlight end
+        if self.end.height >= (size.height + offset.height).saturating_sub(1) {
+            offset.height = std::cmp::min(
+                offset.height.saturating_add(1),
+                self.end
+                    .height
+                    .saturating_sub(size.height)
+                    .saturating_add(2), // space for file info line
+            );
+        }
+        // if height moves less than the offset -> decrement height
+        if self.end.height <= offset.height {
+            offset.height = self.end.height;
+        }
+        //if widith less than offset -> decerement width
+        if self.end.width < offset.width {
+            offset.width = self.end.width;
+        }
+        // if new position is greater than offset, offset gets current_width - screen width
+        // this better handles snapping the cursor to the end of the line
+        if self.end.width >= size.width + offset.width {
+            //self.screen_offset.width = self.screen_offset.width.saturating_sub(1);
+            offset.width = offset.width.saturating_add(1);
+        }
     }
 }
