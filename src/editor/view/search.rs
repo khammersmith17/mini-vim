@@ -37,6 +37,10 @@ enum SearchResolver {
 }
 
 impl Search {
+    pub fn set_previous(&mut self, position: &Position, offset: &Position) {
+        self.previous_position = *position;
+        self.previous_offset = *offset;
+    }
     pub fn find_relative_start(&self, curr_height: &usize) -> Option<usize> {
         // binary search to find the closest search result to pre search cursor position
         // returns Some when there is a search result
@@ -57,14 +61,15 @@ impl Search {
         while l < r {
             if (current_positions[m].height == *curr_height)
                 | ((current_positions[m.saturating_sub(1)].height < *curr_height)
-                    & (current_positions[min(m + 1, current_positions.len() - 1)].height
+                    & (current_positions[min(m + 1, current_positions.len().saturating_sub(1))]
+                        .height
                         > *curr_height))
             {
                 match Self::resolve_closest(
                     *curr_height,
-                    current_positions[m - 1].height,
+                    current_positions[m.saturating_sub(1)].height,
                     current_positions[m].height,
-                    current_positions[m + 1].height,
+                    current_positions[min(m + 1, current_positions.len().saturating_sub(1))].height,
                 ) {
                     SearchResolver::Left => return Some(m - 1),
                     SearchResolver::Mid => return Some(m),
@@ -110,15 +115,14 @@ impl Search {
     }
 
     pub fn set_line_indicies(&mut self) {
-        // getting the line indexes where there are search hits
-        let curr_positions = self
-            .stack
-            .get(self.stack.len().saturating_sub(1))
-            .expect("Stack is empty");
+        if self.stack.is_empty() {
+            return;
+        }
 
         self.line_indicies.clear();
 
-        for position in curr_positions.iter() {
+        // iter through search hits for current query
+        for position in self.stack[self.stack.len().saturating_sub(1)].iter() {
             self.line_indicies.insert(position.height);
         }
     }
@@ -127,6 +131,7 @@ impl Search {
         self.string.clear();
         self.stack.clear();
         self.line_indicies.clear();
+        self.search_index = 0;
     }
 
     pub fn render_search_line(

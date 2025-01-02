@@ -89,6 +89,15 @@ impl fmt::Display for Line {
     }
 }
 
+impl Default for Line {
+    fn default() -> Line {
+        Line {
+            string: Vec::new(),
+            raw_string: String::new(),
+        }
+    }
+}
+
 impl Line {
     pub fn generate_raw_string(&mut self) {
         self.raw_string = self.to_string();
@@ -259,6 +268,9 @@ impl Line {
     }
 
     pub fn get_line_subset(&self, range: Range<usize>) -> Line {
+        if range.start > self.grapheme_len() {
+            return Line::default();
+        }
         let end = std::cmp::min(range.end, self.string.len());
         let new_line = self
             .string

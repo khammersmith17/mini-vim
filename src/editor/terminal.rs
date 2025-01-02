@@ -29,33 +29,115 @@ impl Position {
     }
     */
 
-    pub fn sub_height(&self, diff: usize) -> Position {
+    pub fn view_height(&self, offset: &Position) -> Position {
         Position {
-            height: self.height.saturating_sub(diff),
+            height: self.height.saturating_sub(offset.height),
             width: self.width,
         }
     }
-}
 
-/*
-impl Position {
-    pub fn height_in_view(&self, offset: &Position, size: &Size) -> bool {
-        if (self.height < offset.height) | (self.height > offset.height + size.height) {
-            return false;
+    pub fn right_of_view(&self, offset: &Position, size: &Size) -> bool {
+        if self.width > offset.width + size.width {
+            return true;
         }
+        false
+    }
 
-        return true;
+    pub fn left_of_view(&self, offset: &Position) -> bool {
+        if self.width < offset.width {
+            return true;
+        }
+        false
     }
 
     pub fn width_in_view(&self, offset: &Position, size: &Size) -> bool {
-        if (self.width < offset.width) | (self.width > offset.width + size.width) {
+        if self.left_of_view(offset) | self.right_of_view(offset, size) {
             return false;
         }
+        true
+    }
 
-        return true;
+    pub fn height_in_view(&self, offset: &Position, size: &Size, size_offset: usize) -> bool {
+        if self.above_view(offset) | self.below_view(offset, size, size_offset) {
+            return false;
+        }
+        true
+    }
+
+    pub fn above_view(&self, offset: &Position) -> bool {
+        if self.height < offset.height {
+            return true;
+        }
+        false
+    }
+
+    pub fn below_view(&self, offset: &Position, size: &Size, size_height_offset: usize) -> bool {
+        if self.height > offset.height + size.height.saturating_sub(size_height_offset) {
+            return true;
+        }
+        false
+    }
+
+    pub fn set_width(&mut self, val: usize) {
+        self.width = val;
+    }
+
+    pub fn set_height(&mut self, val: usize) {
+        self.height = val;
+    }
+
+    pub fn left(&mut self, delta: usize) {
+        self.width = self.width.saturating_sub(delta);
+    }
+
+    pub fn up(&mut self, delta: usize) {
+        self.height = self.height.saturating_sub(delta);
+    }
+
+    pub fn right(&mut self, delta: usize, max: usize) {
+        self.width = std::cmp::min(self.width.saturating_add(delta), max);
+    }
+
+    pub fn down(&mut self, delta: usize, max: usize) {
+        self.height = std::cmp::min(self.height.saturating_add(delta), max);
+    }
+
+    pub fn resolve_width(&mut self, max: usize) {
+        self.width = std::cmp::min(self.width, max);
+    }
+
+    pub fn page_up(&mut self) {
+        self.height = 0;
+    }
+
+    pub fn page_down(&mut self, max: usize) {
+        self.height = max;
+    }
+
+    pub fn at_max_width(&mut self, max_width: usize) -> bool {
+        self.width == max_width
+    }
+
+    pub fn at_max_height(&mut self, max_height: usize) -> bool {
+        self.height == max_height
+    }
+
+    pub fn at_top(&mut self) -> bool {
+        self.height == 0
+    }
+
+    pub fn at_left_edge(&mut self) -> bool {
+        self.width == 0
+    }
+
+    pub fn snap_right(&mut self, new_width: usize) {
+        self.width = new_width;
+    }
+
+    pub fn snap_left(&mut self) {
+        self.width = 0;
     }
 }
-*/
 
 #[derive(Copy, Clone, Default)]
 pub struct Location {

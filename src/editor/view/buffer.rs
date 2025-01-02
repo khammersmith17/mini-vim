@@ -227,7 +227,7 @@ impl Buffer {
         pos.width += move_width;
     }
 
-    pub fn update_line_delete(&mut self, pos: &Position) -> usize {
+    pub fn update_line_delete(&mut self, pos: &mut Position) {
         // pop out the char we want to removed
         // return the render_width of that char
         if self.is_tab(pos) {
@@ -238,7 +238,8 @@ impl Buffer {
                     .string
                     .remove(i);
             }
-            return 4;
+            pos.left(4);
+            return;
         }
         let removed_char = self
             .text
@@ -251,10 +252,11 @@ impl Buffer {
             .expect("Out of bounds error")
             .generate_raw_string();
         self.is_saved = false;
-        match removed_char.render_width {
+        let diff = match removed_char.render_width {
             GraphemeWidth::Half => 1,
             GraphemeWidth::Full => 2,
-        }
+        };
+        pos.left(diff);
     }
 
     pub fn is_tab(&self, pos: &Position) -> bool {

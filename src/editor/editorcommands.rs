@@ -76,3 +76,93 @@ impl TryFrom<Event> for EditorCommand {
         }
     }
 }
+
+#[derive(Copy, Clone)]
+pub enum SearchCommand {
+    Insert(char),
+    Next,
+    Previous,
+    BackSpace,
+    RevertState,
+    AssumeState,
+    Resize(Size),
+    NoAction,
+}
+
+impl TryFrom<Event> for SearchCommand {
+    type Error = String;
+    fn try_from(event: Event) -> Result<Self, Self::Error> {
+        match event {
+            Event::Key(KeyEvent {
+                code, modifiers, ..
+            }) => match (code, modifiers) {
+                (KeyCode::Char('n'), KeyModifiers::CONTROL) => Ok(Self::Next),
+                (KeyCode::Char('p'), KeyModifiers::CONTROL) => Ok(Self::Previous),
+                (KeyCode::Char(c), _) => Ok(Self::Insert(c)),
+                (KeyCode::Enter, _) => Ok(Self::AssumeState),
+                (KeyCode::Esc, _) => Ok(Self::RevertState),
+                (KeyCode::Backspace, _) => Ok(Self::BackSpace),
+                _ => Ok(Self::NoAction),
+            },
+            Event::Resize(width_u16, height_u16) => Ok(Self::Resize(Size {
+                height: height_u16 as usize,
+                width: width_u16 as usize,
+            })),
+            _ => Err("Invalid key press read".into()),
+        }
+    }
+}
+
+pub enum HighlightCommand {
+    RevertState,
+    Copy,
+    Resize(Size),
+    Move(Direction),
+    NoAction,
+}
+
+impl TryFrom<Event> for HighlightCommand {
+    type Error = String;
+    fn try_from(event: Event) -> Result<Self, Self::Error> {
+        match event {
+            Event::Key(KeyEvent {
+                code, modifiers, ..
+            }) => match (code, modifiers) {
+                (KeyCode::Char('c'), KeyModifiers::CONTROL) => Ok(Self::Copy),
+                (KeyCode::Up, _) => Ok(Self::Move(Direction::Up)),
+                (KeyCode::Down, _) => Ok(Self::Move(Direction::Down)),
+                (KeyCode::Right, _) => Ok(Self::Move(Direction::Right)),
+                (KeyCode::Left, _) => Ok(Self::Move(Direction::Left)),
+                (KeyCode::Esc, _) => Ok(Self::RevertState),
+                _ => Ok(Self::NoAction),
+            },
+            Event::Resize(width_u16, height_u16) => Ok(Self::Resize(Size {
+                height: height_u16 as usize,
+                width: width_u16 as usize,
+            })),
+            _ => Err("Invalid key press read".into()),
+        }
+    }
+}
+
+pub enum FileNameCommand {
+    Insert(char),
+    BackSpace,
+    SaveFileName,
+    NoAction,
+}
+
+impl TryFrom<Event> for FileNameCommand {
+    type Error = String;
+    fn try_from(event: Event) -> Result<Self, Self::Error> {
+        match event {
+            Event::Key(KeyEvent { code, .. }) => match code {
+                KeyCode::Char(c) => Ok(Self::Insert(c)),
+                KeyCode::Backspace => Ok(Self::BackSpace),
+                KeyCode::Enter => Ok(Self::SaveFileName),
+                _ => Ok(Self::NoAction),
+            },
+            _ => Ok(Self::NoAction),
+        }
+    }
+}
