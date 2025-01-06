@@ -128,6 +128,7 @@ impl Search {
     }
 
     pub fn clean_up_search(&mut self) {
+        self.render_search = false;
         self.string.clear();
         self.stack.clear();
         self.line_indicies.clear();

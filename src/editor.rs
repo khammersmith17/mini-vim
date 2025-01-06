@@ -4,6 +4,7 @@ mod terminal;
 use std::env::args;
 use std::io::Error;
 use std::panic::{set_hook, take_hook};
+use std::{thread, time::Duration};
 use terminal::{Position, Terminal};
 mod view;
 use view::View;
@@ -78,8 +79,10 @@ impl Editor {
                                         self.view.buffer.save();
                                     }
                                     true => {
-                                        Terminal::clear_screen().expect("Error clearing screen");
+                                        Terminal::clear_screen().unwrap();
                                         self.view.render_line(0, "Exiting without saving...");
+                                        Terminal::execute().unwrap();
+                                        thread::sleep(Duration::from_millis(300));
                                     }
                                 }
                             }
@@ -105,12 +108,11 @@ impl Editor {
     }
 
     fn exit_without_saving(&self) -> bool {
-        let mut result: bool = false;
-        Terminal::clear_screen().expect("Error clearing screen");
-        Terminal::hide_cursor().expect("Error hiding cursor");
-        self.view
-            .render_line(0, "Leave without saving: Ctrl-y = exit | Ctrl-n = save");
-        Terminal::execute().expect("Error flushing std buffer");
+        Terminal::clear_screen().unwrap();
+        Terminal::hide_cursor().unwrap();
+        self.view.render_line(0, "Leave without saving:");
+        self.view.render_line(1, "Ctrl-y = exit | Ctrl-n = save");
+        Terminal::execute().unwrap();
         loop {
             match read() {
                 Ok(event) => match event {
@@ -118,11 +120,10 @@ impl Editor {
                         code, modifiers, ..
                     }) => match (code, modifiers) {
                         (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
-                            result = true;
-                            break;
+                            return true;
                         }
                         (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
-                            break;
+                            return false;
                         }
                         _ => {
                             // not reading other key presses
@@ -140,7 +141,6 @@ impl Editor {
                 }
             }
         }
-        result
     }
 
     fn refresh_screen(&mut self) -> Result<(), Error> {

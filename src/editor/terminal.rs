@@ -20,12 +20,24 @@ pub struct Position {
 }
 
 impl Position {
-    /*
-    pub fn sub_width(&self, diff: usize) -> Position {
-        Position {
-            height: self.height,
-            width: self.width.saturating_sub(diff),
+    pub fn diff_height(&self, other: &Position) -> usize {
+        if self.height > other.height {
+            return self.height - other.height;
         }
+        other.height - self.height
+    }
+
+    pub fn set_position(&mut self, new: Position) {
+        self.set_height(new.height);
+        self.set_width(new.width);
+    }
+
+    /*
+    pub fn diff_width(&self, other: &Position) -> usize {
+        if self.height > other.height {
+            return self.width - other.width;
+        }
+        other.width - self.width
     }
     */
 
@@ -72,7 +84,7 @@ impl Position {
     }
 
     pub fn below_view(&self, offset: &Position, size: &Size, size_height_offset: usize) -> bool {
-        if self.height > offset.height + size.height.saturating_sub(size_height_offset) {
+        if self.height >= offset.height + size.height.saturating_sub(size_height_offset) {
             return true;
         }
         false

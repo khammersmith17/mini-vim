@@ -2,7 +2,7 @@ use super::terminal::Size;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use std::convert::TryFrom;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum Direction {
     Up,
     Down,
@@ -28,6 +28,7 @@ pub enum EditorCommand {
     Save,
     Theme,
     Delete,
+    VimMode,
     Search,
     Help,
     None,
@@ -53,6 +54,7 @@ impl TryFrom<Event> for EditorCommand {
                 (KeyCode::Char('t'), KeyModifiers::CONTROL) => Ok(Self::Theme),
                 (KeyCode::Char('v'), KeyModifiers::CONTROL) => Ok(Self::Paste),
                 (KeyCode::Char('c'), KeyModifiers::CONTROL) => Ok(Self::Highlight),
+                (KeyCode::Char('n'), KeyModifiers::CONTROL) => Ok(Self::VimMode),
                 (KeyCode::Left, KeyModifiers::SHIFT) => Ok(Self::JumpWord(Direction::Left)),
                 (KeyCode::Right, KeyModifiers::SHIFT) => Ok(Self::JumpWord(Direction::Right)),
                 (KeyCode::Up, _) => Ok(Self::Move(Direction::Up)),
@@ -98,6 +100,7 @@ impl TryFrom<Event> for SearchCommand {
             }) => match (code, modifiers) {
                 (KeyCode::Char('n'), KeyModifiers::CONTROL) => Ok(Self::Next),
                 (KeyCode::Char('p'), KeyModifiers::CONTROL) => Ok(Self::Previous),
+                (_, KeyModifiers::CONTROL) => Ok(Self::NoAction),
                 (KeyCode::Char(c), _) => Ok(Self::Insert(c)),
                 (KeyCode::Enter, _) => Ok(Self::AssumeState),
                 (KeyCode::Esc, _) => Ok(Self::RevertState),
@@ -119,6 +122,7 @@ pub enum HighlightCommand {
     Resize(Size),
     Move(Direction),
     NoAction,
+    Delete,
 }
 
 impl TryFrom<Event> for HighlightCommand {
@@ -129,11 +133,13 @@ impl TryFrom<Event> for HighlightCommand {
                 code, modifiers, ..
             }) => match (code, modifiers) {
                 (KeyCode::Char('c'), KeyModifiers::CONTROL) => Ok(Self::Copy),
+                (_, KeyModifiers::CONTROL) => Ok(Self::NoAction),
                 (KeyCode::Up, _) => Ok(Self::Move(Direction::Up)),
                 (KeyCode::Down, _) => Ok(Self::Move(Direction::Down)),
                 (KeyCode::Right, _) => Ok(Self::Move(Direction::Right)),
                 (KeyCode::Left, _) => Ok(Self::Move(Direction::Left)),
                 (KeyCode::Esc, _) => Ok(Self::RevertState),
+                (KeyCode::Backspace, _) => Ok(Self::Delete),
                 _ => Ok(Self::NoAction),
             },
             Event::Resize(width_u16, height_u16) => Ok(Self::Resize(Size {
@@ -160,6 +166,59 @@ impl TryFrom<Event> for FileNameCommand {
                 KeyCode::Char(c) => Ok(Self::Insert(c)),
                 KeyCode::Backspace => Ok(Self::BackSpace),
                 KeyCode::Enter => Ok(Self::SaveFileName),
+                _ => Ok(Self::NoAction),
+            },
+            _ => Ok(Self::NoAction),
+        }
+    }
+}
+
+pub enum VimModeCommands {
+    Move(Direction),
+    NoAction,
+    Exit,
+}
+
+impl TryFrom<Event> for VimModeCommands {
+    type Error = String;
+    fn try_from(event: Event) -> Result<Self, Self::Error> {
+        match event {
+            Event::Key(KeyEvent { code, .. }) => match code {
+                KeyCode::Char('l') => Ok(Self::Move(Direction::Left)),
+                KeyCode::Char('k') => Ok(Self::Move(Direction::Up)),
+                KeyCode::Char('j') => Ok(Self::Move(Direction::Down)),
+                KeyCode::Char('h') => Ok(Self::Move(Direction::Right)),
+                KeyCode::Esc => Ok(Self::Exit),
+                _ => Ok(Self::NoAction),
+            },
+            _ => Ok(Self::NoAction),
+        }
+    }
+}
+
+pub enum JumpCommand {
+    Enter(usize),
+    Delete,
+    Move,
+    Exit,
+    NoAction,
+}
+
+impl TryFrom<Event> for JumpCommand {
+    type Error = String;
+    fn try_from(event: Event) -> Result<Self, Self::Error> {
+        match event {
+            Event::Key(KeyEvent { code, .. }) => match code {
+                KeyCode::Char(val) => {
+                    if let Some(digit) = val.to_digit(10) {
+                        Ok(Self::Enter(digit.try_into().unwrap()))
+                    } else {
+                        Ok(Self::NoAction)
+                    }
+                }
+                KeyCode::Backspace => Ok(Self::Delete),
+                KeyCode::Esc => Ok(Self::Exit),
+                KeyCode::Enter => Ok(Self::Move),
                 _ => Ok(Self::NoAction),
             },
             _ => Ok(Self::NoAction),

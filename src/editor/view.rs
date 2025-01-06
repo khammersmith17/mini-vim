@@ -1,11 +1,11 @@
 use super::terminal::{Position, Size, Terminal};
 use clipboard::{ClipboardContext, ClipboardProvider};
-use crossterm::event::{read, Event, KeyCode, KeyEvent};
-use std::ops::RangeInclusive;
+use crossterm::event::read;
 use std::time::Instant;
 mod buffer;
 use super::editorcommands::{
-    Direction, EditorCommand, FileNameCommand, HighlightCommand, SearchCommand,
+    Direction, EditorCommand, FileNameCommand, HighlightCommand, JumpCommand, SearchCommand,
+    VimModeCommands,
 };
 use buffer::Buffer;
 use std::cmp::min;
@@ -17,7 +17,7 @@ use search::Search;
 pub mod help;
 use help::Help;
 mod highlight;
-use highlight::{Highlight, HighlightLineType, HighlightOrientation};
+use highlight::{Highlight, HighlightOrientation};
 
 const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
 const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -331,10 +331,14 @@ impl View {
         let mut curr_position: usize = 10;
         self.render_filename_screen(&filename_buffer, curr_position);
         loop {
-            let read_event = match read() {
-                Ok(event) => event,
-                Err(_) => continue,
-            };
+            /*
+                        let read_event = match read() {
+                            Ok(event) => event,
+                            Err(_) => continue,
+                        };
+
+            */
+            let Ok(read_event) = read() else { continue };
 
             match FileNameCommand::try_from(read_event) {
                 Ok(event) => match event {
@@ -425,9 +429,31 @@ impl View {
                 self.help_indicator.render_help = true;
                 self.help_indicator.time_began = Instant::now();
             }
+            EditorCommand::VimMode => self.enter_vim_mode(),
             _ => {}
         }
         self.needs_redraw = true;
+    }
+
+    fn enter_vim_mode(&mut self) {
+        loop {
+            let Ok(read_event) = read() else { continue }; //skipping an error on read cursor action
+
+            match VimModeCommands::try_from(read_event) {
+                Ok(event) => match event {
+                    VimModeCommands::Move(dir) => match dir {
+                        Direction::Right | Direction::Left | Direction::Up | Direction::Down => {
+                            self.move_cursor(dir);
+                        }
+                        _ => continue,
+                    },
+                    VimModeCommands::Exit => return,
+                    VimModeCommands::NoAction => continue, // skipping other
+                },
+                Err(_) => continue, //ignoring error
+            }
+            self.render();
+        }
     }
 
     fn new_line(&mut self) {
@@ -448,7 +474,8 @@ impl View {
                 .split_line(self.cursor_position.height, self.cursor_position.width);
         }
 
-        self.cursor_position.height = self.cursor_position.height.saturating_add(1);
+        self.cursor_position
+            .down(1, self.buffer.len().saturating_sub(1));
         self.cursor_position.width = if self.buffer.is_tab(&Position {
             height: self.cursor_position.height,
             width: 4,
@@ -460,12 +487,15 @@ impl View {
     }
 
     fn deletion(&mut self) {
+        if self.buffer.is_empty() {
+            return;
+        }
         match self.cursor_position.width {
             0 => match (
                 self.cursor_position.at_top(),
                 self.buffer.text[self.cursor_position.height].is_empty(),
             ) {
-                (true, false) => return,
+                (true, true) => return,
                 (false, true) => {
                     self.buffer.text.remove(self.cursor_position.height);
                     self.cursor_position.up(1);
@@ -499,42 +529,32 @@ impl View {
         Terminal::execute().unwrap();
 
         loop {
-            match read() {
-                Ok(event) => match event {
-                    Event::Key(KeyEvent { code, .. }) => match code {
-                        KeyCode::Char(val) => {
-                            if let Some(digit) = val.to_digit(10) {
-                                line = line * 10 + digit as usize;
-                            }
-                        }
-                        KeyCode::Backspace => {
-                            line = if line > 9 { line / 10 } else { 0 };
-                        }
-                        KeyCode::Enter => {
-                            // if line > buffer.len(), give buffer len
-                            if line < self.buffer.len() {
-                                self.cursor_position.height = line.saturating_sub(1);
-                            } else {
-                                self.move_cursor(Direction::PageDown);
-                            };
+            let Ok(read_event) = read() else { continue }; //skipping errors here
+            match JumpCommand::try_from(read_event) {
+                Ok(command) => match command {
+                    JumpCommand::Enter(digit) => line = line * 10 + digit,
+                    JumpCommand::Delete => line = if line > 9 { line / 10 } else { 0 },
+                    JumpCommand::Move => {
+                        // if line > buffer.len(), give buffer len
+                        if line < self.buffer.len() {
+                            self.cursor_position.height = line.saturating_sub(1);
+                        } else {
+                            self.move_cursor(Direction::PageDown);
+                        };
 
-                            if (self.cursor_position.height
-                                > self.size.height + self.screen_offset.height)
-                                | (self.cursor_position.height < self.screen_offset.height)
-                            {
-                                self.handle_offset_screen_snap();
-                            }
-                            break;
+                        if (self.cursor_position.height
+                            > self.size.height + self.screen_offset.height)
+                            | (self.cursor_position.height < self.screen_offset.height)
+                        {
+                            self.handle_offset_screen_snap();
                         }
-                        KeyCode::Esc => {
-                            break;
-                        }
-                        _ => {}
-                    },
-                    _ => {}
+                    }
+                    JumpCommand::Exit => return,
+                    JumpCommand::NoAction => continue,
                 },
-                Err(_) => {}
+                Err(_) => continue,
             }
+
             match line {
                 0 => {
                     let _ = Terminal::render_line(neg_2, &format!("{}", render_string));
@@ -638,10 +658,7 @@ impl View {
             // on errors or events that dont matter in this context
             // skip and continue
             self.render_search();
-            let read_event = match read() {
-                Ok(event) => event,
-                Err(_) => continue,
-            };
+            let Ok(read_event) = read() else { continue }; //skipping errors here
 
             match SearchCommand::try_from(read_event) {
                 Ok(event) => match event {
@@ -689,12 +706,10 @@ impl View {
                     SearchCommand::RevertState => {
                         //return to pre search screen state
                         self.revert_screen_state();
-                        self.search.clean_up_search();
                         break;
                     }
                     SearchCommand::AssumeState => {
                         //assume current state on screen after search
-                        self.search.clean_up_search();
                         break;
                     }
                     SearchCommand::BackSpace => {
@@ -746,7 +761,7 @@ impl View {
                 self.handle_offset_screen_snap();
             }
         }
-        self.search.render_search = false;
+        self.search.clean_up_search();
         self.render();
     }
 
@@ -788,10 +803,7 @@ impl View {
         let previous_offset = self.screen_offset;
 
         loop {
-            let read_event = match read() {
-                Ok(event) => event,
-                Err(_) => continue,
-            };
+            let Ok(read_event) = read() else { continue }; //skipping errors here
 
             match HighlightCommand::try_from(read_event) {
                 Ok(event) => match event {
@@ -828,10 +840,10 @@ impl View {
                             }
                         }
                         Direction::Down => {
+                            self.highlight.end.down(1, max_height);
                             if self.highlight.end.at_max_height(max_height) {
                                 continue;
                             }
-                            self.highlight.end.height += 1;
                             self.highlight.end.resolve_width(
                                 self.buffer.text[self.highlight.end.height]
                                     .grapheme_len()
@@ -853,13 +865,19 @@ impl View {
                         _ => continue,
                     },
                     HighlightCommand::Copy => {
-                        self.highlight.render = false;
                         break;
                     }
                     HighlightCommand::Resize(size) => self.resize(size),
                     HighlightCommand::RevertState => {
                         self.screen_offset = previous_offset;
-                        self.highlight.render = false;
+                        self.highlight.clean_up();
+                        return;
+                    }
+                    HighlightCommand::Delete => {
+                        if self.cursor_position != self.highlight.end {
+                            self.batch_delete();
+                        }
+                        self.highlight.clean_up();
                         return;
                     }
                     HighlightCommand::NoAction => continue,
@@ -876,42 +894,21 @@ impl View {
             self.render();
 
             if self.cursor_position.height == self.highlight.end.height {
-                let h_r = match self.highlight.or {
-                    HighlightOrientation::EndFirst => {
-                        self.highlight.end.width..=self.cursor_position.width
-                    }
-                    HighlightOrientation::StartFirst => {
-                        self.cursor_position.width..=self.highlight.end.width
-                    }
-                };
-
-                // cond for is the highlight ends at the end of the line
-                let te = self.buffer.text[self.cursor_position.height]
-                    .raw_string
-                    .len()
-                    - 1
-                    == *h_r.end();
-                // cond for if the highlight starts at pos 0
-                let ts = *h_r.start() == 0;
-
-                // determine how the single line needs to be highlighted
-                let h_t = match (te, ts) {
-                    (true, true) => HighlightLineType::All,
-                    (true, false) => HighlightLineType::Trailing,
-                    (false, true) => HighlightLineType::Leading,
-                    (false, false) => HighlightLineType::Middle,
-                };
-
-                Highlight::render_highlight_line(
-                    &self.buffer.text[self.cursor_position.height].raw_string,
-                    self.cursor_position.height,
-                    h_r,
-                    h_t,
-                    self.theme.search_highlight.clone(),
-                    self.theme.search_text.clone(),
+                self.highlight.render_single_line(
+                    &self.cursor_position,
+                    &self.buffer,
+                    self.theme.search_highlight,
+                    self.theme.search_text,
                 );
             } else {
-                self.multiline_highlight();
+                self.highlight.multi_line_render(
+                    &self.cursor_position,
+                    &self.screen_offset,
+                    &self.size,
+                    &self.buffer,
+                    self.theme.search_highlight,
+                    self.theme.search_text,
+                );
             }
 
             Terminal::move_cursor_to(self.highlight.end.view_height(&self.screen_offset)).unwrap();
@@ -919,115 +916,93 @@ impl View {
             Terminal::execute().unwrap();
         }
 
-        let copy_string = if self.highlight.end.height > self.cursor_position.height {
-            self.highlight
-                .generate_copy_str(&self.buffer, &self.cursor_position)
-        } else {
-            self.highlight
-                .generate_copy_str(&self.buffer, &self.cursor_position)
-        };
-        if copy_string.is_empty() {
-            return;
+        let copy_string = self
+            .highlight
+            .generate_copy_str(&self.buffer, &self.cursor_position);
+
+        if !copy_string.is_empty() {
+            self.copy_text_to_clipboard(copy_string);
         }
-        self.copy_text_to_clipboard(copy_string);
-    }
-
-    fn multiline_highlight(&self) {
-        // to check visibility of the line
-        let visible_height_range = RangeInclusive::new(
-            self.screen_offset.height,
-            self.screen_offset.height + self.size.height,
-        );
-        let visible_width_range = RangeInclusive::new(
-            self.screen_offset.width,
-            self.screen_offset.width + self.size.width,
-        );
-
-        for line_height in self.highlight.line_range.clone() {
-            // if line height not on the current screen view
-            if !visible_height_range.contains(&line_height) {
-                continue;
-            }
-
-            let line_text = &self.buffer.text[line_height].raw_string;
-            // if line width not on screen
-            if line_text.len().saturating_sub(1) < *visible_width_range.start() {
-                continue;
-            }
-
-            // get the visible portion of the line
-            let visible_line = match line_text.get(
-                *visible_width_range.start()
-                    ..=std::cmp::min(
-                        *visible_width_range.end(),
-                        line_text.len().saturating_sub(1),
-                    ),
-            ) {
-                Some(text) => text,
-                None => continue,
-            };
-
-            // when the line is the start
-            // need to handle a partial line highlight
-            if line_height == self.cursor_position.height {
-                match self.highlight.or {
-                    HighlightOrientation::StartFirst => Highlight::render_highlight_line(
-                        visible_line,
-                        line_height.saturating_sub(self.screen_offset.height),
-                        self.cursor_position.width..=visible_line.len() - 1,
-                        HighlightLineType::Trailing,
-                        self.theme.search_highlight.clone(),
-                        self.theme.search_text.clone(),
-                    ),
-                    HighlightOrientation::EndFirst => Highlight::render_highlight_line(
-                        visible_line,
-                        line_height.saturating_sub(self.screen_offset.height),
-                        0..=self.cursor_position.width,
-                        HighlightLineType::Leading,
-                        self.theme.search_highlight.clone(),
-                        self.theme.search_text.clone(),
-                    ),
-                }
-                continue;
-            }
-
-            // when the line is the end
-            // need to handle a partial line highlight
-            if line_height == self.highlight.end.height {
-                match self.highlight.or {
-                    HighlightOrientation::StartFirst => Highlight::render_highlight_line(
-                        visible_line,
-                        line_height.saturating_sub(self.screen_offset.height),
-                        0..=self.highlight.end.width,
-                        HighlightLineType::Leading,
-                        self.theme.search_highlight.clone(),
-                        self.theme.search_text.clone(),
-                    ),
-                    HighlightOrientation::EndFirst => Highlight::render_highlight_line(
-                        visible_line,
-                        line_height.saturating_sub(self.screen_offset.height),
-                        self.highlight.end.width..=visible_line.len() - 1,
-                        HighlightLineType::Trailing,
-                        self.theme.search_highlight.clone(),
-                        self.theme.search_text.clone(),
-                    ),
-                }
-                continue;
-            }
-
-            // if we get here, we are highlighting the whole line
-            Highlight::render_highlight_line(
-                visible_line,
-                line_height.saturating_sub(self.screen_offset.height),
-                0..=visible_line.len() - 1,
-                HighlightLineType::All,
-                self.theme.search_highlight.clone(),
-                self.theme.search_text.clone(),
-            )
-        }
+        self.highlight.clean_up();
     }
 
     fn copy_text_to_clipboard(&mut self, content: String) {
         self.clipboard.set_contents(content).unwrap();
+    }
+
+    fn batch_delete(&mut self) {
+        self.highlight.resolve_orientation(&self.cursor_position);
+
+        if self.cursor_position.diff_height(&self.highlight.end) == 0 {
+            match self.highlight.or {
+                HighlightOrientation::StartFirst => self
+                    .buffer
+                    .delete_segment(&self.cursor_position, &mut self.highlight.end),
+                HighlightOrientation::EndFirst => self
+                    .buffer
+                    .delete_segment(&self.highlight.end, &mut self.cursor_position),
+            }
+        } else {
+            if self.cursor_position.diff_height(&self.highlight.end) > 1 {
+                let range_iter = match self.highlight.or {
+                    HighlightOrientation::StartFirst => {
+                        (self.cursor_position.height + 1..self.highlight.end.height).rev()
+                    }
+                    HighlightOrientation::EndFirst => {
+                        (self.highlight.end.height + 1..self.cursor_position.height).rev()
+                    }
+                };
+
+                for line in range_iter {
+                    self.buffer.pop_line(line);
+                }
+            }
+
+            //delete everything left of bottom position
+            //delete everything right of top position
+            //join the lines
+            match self.highlight.or {
+                HighlightOrientation::StartFirst => {
+                    self.highlight
+                        .end
+                        .set_height(self.cursor_position.height.saturating_add(1));
+                    self.buffer.delete_segment(
+                        &Position {
+                            width: 0,
+                            height: self.highlight.end.height,
+                        },
+                        &mut self.highlight.end,
+                    );
+                    self.buffer.delete_segment(
+                        &self.cursor_position,
+                        &mut Position {
+                            width: self.buffer.text[self.cursor_position.height].len() - 1,
+                            height: self.cursor_position.height,
+                        },
+                    );
+                    self.buffer.join_line(self.highlight.end.height);
+                }
+                HighlightOrientation::EndFirst => {
+                    self.cursor_position
+                        .set_height(self.highlight.end.height.saturating_add(1));
+                    self.buffer.delete_segment(
+                        &self.cursor_position,
+                        &mut Position {
+                            width: self.buffer.text[self.highlight.end.height].len() - 1,
+                            height: self.highlight.end.height,
+                        },
+                    );
+                    self.buffer.delete_segment(
+                        &Position {
+                            width: 0,
+                            height: self.cursor_position.height,
+                        },
+                        &mut self.cursor_position,
+                    );
+                    self.buffer.join_line(self.cursor_position.height);
+                    self.cursor_position.set_position(self.highlight.end);
+                }
+            }
+        }
     }
 }

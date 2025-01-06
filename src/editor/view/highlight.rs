@@ -49,6 +49,13 @@ impl Default for Highlight {
 }
 
 impl Highlight {
+    pub fn clean_up(&mut self) {
+        self.render = false;
+        self.line_range = 0..=0;
+        self.or = HighlightOrientation::default();
+        self.end = Position::default();
+    }
+
     pub fn adjust_range(&mut self, pos1: &Position) {
         match self.or {
             HighlightOrientation::StartFirst => {
@@ -59,6 +66,7 @@ impl Highlight {
             }
         }
     }
+
     pub fn resolve_orientation(&mut self, pos1: &Position) {
         if pos1.height == self.end.height {
             if pos1.width <= self.end.width {
@@ -162,6 +170,139 @@ impl Highlight {
         if self.end.width >= size.width + offset.width {
             //self.screen_offset.width = self.screen_offset.width.saturating_sub(1);
             offset.width = offset.width.saturating_add(1);
+        }
+    }
+
+    pub fn render_single_line(
+        &self,
+        start_pos: &Position,
+        buffer: &Buffer,
+        highlight_color: Color,
+        text_color: Color,
+    ) {
+        let h_r = match self.or {
+            HighlightOrientation::EndFirst => self.end.width..=start_pos.width,
+            HighlightOrientation::StartFirst => start_pos.width..=self.end.width,
+        };
+
+        // cond for is the highlight ends at the end of the line
+        let te = buffer.text[start_pos.height].raw_string.len() - 1 == *h_r.end();
+        // cond for if the highlight starts at pos 0
+        let ts = *h_r.start() == 0;
+
+        // determine how the single line needs to be highlighted
+        let h_t = match (te, ts) {
+            (true, true) => HighlightLineType::All,
+            (true, false) => HighlightLineType::Trailing,
+            (false, true) => HighlightLineType::Leading,
+            (false, false) => HighlightLineType::Middle,
+        };
+
+        Self::render_highlight_line(
+            &buffer.text[start_pos.height].raw_string,
+            start_pos.height,
+            h_r,
+            h_t,
+            highlight_color,
+            text_color,
+        );
+    }
+
+    pub fn multi_line_render(
+        &self,
+        start_pos: &Position,
+        screen_offset: &Position,
+        size: &Size,
+        buffer: &Buffer,
+        highlight_color: Color,
+        text_color: Color,
+    ) {
+        let visible_height_range =
+            RangeInclusive::new(screen_offset.height, screen_offset.height + size.height);
+        let visible_width_range =
+            RangeInclusive::new(screen_offset.width, screen_offset.width + size.width);
+
+        for line_height in self.line_range.clone() {
+            // if line height not on the current screen view
+            if !visible_height_range.contains(&line_height) {
+                continue;
+            }
+
+            let line_text = &buffer.text[line_height].raw_string;
+            // if line width not on screen
+            if line_text.len().saturating_sub(1) < *visible_width_range.start() {
+                continue;
+            }
+
+            // get the visible portion of the line
+            let visible_line = match line_text.get(
+                *visible_width_range.start()
+                    ..=std::cmp::min(
+                        *visible_width_range.end(),
+                        line_text.len().saturating_sub(1),
+                    ),
+            ) {
+                Some(text) => text,
+                None => continue,
+            };
+
+            // when the line is the start
+            // need to handle a partial line highlight
+            if line_height == start_pos.height {
+                match self.or {
+                    HighlightOrientation::StartFirst => Self::render_highlight_line(
+                        visible_line,
+                        line_height.saturating_sub(screen_offset.height),
+                        start_pos.width..=visible_line.len() - 1,
+                        HighlightLineType::Trailing,
+                        highlight_color,
+                        text_color,
+                    ),
+                    HighlightOrientation::EndFirst => Self::render_highlight_line(
+                        visible_line,
+                        line_height.saturating_sub(screen_offset.height),
+                        0..=start_pos.width,
+                        HighlightLineType::Leading,
+                        highlight_color,
+                        text_color,
+                    ),
+                }
+                continue;
+            }
+
+            // when the line is the end
+            // need to handle a partial line highlight
+            if line_height == self.end.height {
+                match self.or {
+                    HighlightOrientation::StartFirst => Highlight::render_highlight_line(
+                        visible_line,
+                        line_height.saturating_sub(screen_offset.height),
+                        0..=self.end.width,
+                        HighlightLineType::Leading,
+                        highlight_color,
+                        text_color,
+                    ),
+                    HighlightOrientation::EndFirst => Highlight::render_highlight_line(
+                        visible_line,
+                        line_height.saturating_sub(screen_offset.height),
+                        self.end.width..=visible_line.len() - 1,
+                        HighlightLineType::Trailing,
+                        highlight_color,
+                        text_color,
+                    ),
+                }
+                continue;
+            }
+
+            // if we get here, we are highlighting the whole line
+            Highlight::render_highlight_line(
+                visible_line,
+                line_height.saturating_sub(screen_offset.height),
+                0..=visible_line.len() - 1,
+                HighlightLineType::All,
+                highlight_color,
+                text_color,
+            )
         }
     }
 }

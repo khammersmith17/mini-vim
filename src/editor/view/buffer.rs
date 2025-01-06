@@ -21,11 +21,7 @@ impl Buffer {
     }
 
     pub fn add_text_from_clipboard(&mut self, paste_text: String, pos: &mut Position) {
-        let mut buff_len = if !self.is_empty() {
-            self.text.len() - 1
-        } else {
-            0
-        };
+        let mut buff_len = if !self.is_empty() { self.len() - 1 } else { 0 };
         for (i, line_str) in paste_text.lines().enumerate() {
             if i != 0 {
                 pos.height += 1;
@@ -364,5 +360,17 @@ impl Buffer {
             .get_mut(line_index.saturating_sub(1))
             .expect("Out of bounds error")
             .generate_raw_string();
+    }
+
+    pub fn delete_segment(&mut self, left_pos: &Position, right_pos: &mut Position) {
+        //delete from right to left
+        right_pos.width += 1;
+        while right_pos.width > left_pos.width {
+            self.update_line_delete(right_pos);
+        }
+    }
+
+    pub fn pop_line(&mut self, line_index: usize) {
+        self.text.remove(line_index);
     }
 }

@@ -103,6 +103,10 @@ impl Line {
         self.raw_string = self.to_string();
     }
 
+    pub fn len(&self) -> usize {
+        self.string.len()
+    }
+
     pub fn grapheme_len(&self) -> usize {
         if self.string.len() == 0 {
             return 0;
