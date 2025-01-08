@@ -214,7 +214,6 @@ impl View {
 
     pub fn move_cursor(&mut self, key_code: Direction) {
         if !self.buffer.is_empty() {
-            let mut snap = false;
             match key_code {
                 //if not on last line, move down
                 //if the next line is shorter, snap to the end of that line
@@ -247,7 +246,6 @@ impl View {
                             self.cursor_position.snap_right(
                                 self.buffer.text[self.cursor_position.height].grapheme_len(),
                             );
-                            snap = true;
                         }
                         _ => {
                             self.cursor_position.left(1);
@@ -268,7 +266,6 @@ impl View {
                         (true, false) => {
                             self.cursor_position.down(1, text_height);
                             self.cursor_position.snap_left();
-                            snap = true;
                         }
                         _ => self.cursor_position.right(1, grapheme_len),
                     };
@@ -277,35 +274,38 @@ impl View {
                 Direction::PageDown => {
                     self.cursor_position
                         .page_down(self.buffer.len().saturating_sub(1));
-                    snap = true;
                 }
                 //move to the first line, cursor width stays the same
                 Direction::PageUp => {
                     self.cursor_position.page_up();
-                    snap = true;
                 }
                 //move to end of current line
                 Direction::End => {
                     self.cursor_position
                         .snap_right(self.buffer.text[self.cursor_position.height].grapheme_len());
-                    snap = true;
                 }
                 //move to start of current line
                 Direction::Home => {
                     self.cursor_position.snap_left();
-                    snap = true;
                 }
             }
-            if snap {
-                self.handle_offset_screen_snap();
-            } else {
+
+            let dis = self.cursor_position.max_displacement_from_view(
+                &self.screen_offset,
+                &self.size,
+                !(self.search.render_search | self.help_indicator.render_help) as usize + 1,
+            );
+            if dis == 1 {
                 self.update_offset_single_move();
+                self.needs_redraw = true;
+            } else if dis > 1 {
+                self.handle_offset_screen_snap();
+                self.needs_redraw = true;
             }
         } else {
             self.cursor_position.page_up();
             self.cursor_position.snap_left();
         }
-        self.needs_redraw = true;
     }
 
     fn insert_char(&mut self, insert_char: char) {
@@ -331,13 +331,6 @@ impl View {
         let mut curr_position: usize = 10;
         self.render_filename_screen(&filename_buffer, curr_position);
         loop {
-            /*
-                        let read_event = match read() {
-                            Ok(event) => event,
-                            Err(_) => continue,
-                        };
-
-            */
             let Ok(read_event) = read() else { continue };
 
             match FileNameCommand::try_from(read_event) {
@@ -442,7 +435,12 @@ impl View {
             match VimModeCommands::try_from(read_event) {
                 Ok(event) => match event {
                     VimModeCommands::Move(dir) => match dir {
-                        Direction::Right | Direction::Left | Direction::Up | Direction::Down => {
+                        Direction::Right
+                        | Direction::Left
+                        | Direction::Up
+                        | Direction::Down
+                        | Direction::End
+                        | Direction::Home => {
                             self.move_cursor(dir);
                         }
                         _ => continue,
@@ -452,7 +450,21 @@ impl View {
                 },
                 Err(_) => continue, //ignoring error
             }
-            self.render();
+            //TODO:
+            //clean this up
+            //screen offset is not being updated correctly here
+            if self.needs_redraw {
+                Terminal::clear_screen().unwrap();
+                Terminal::hide_cursor().unwrap();
+                Terminal::move_cursor_to(self.screen_offset).unwrap();
+                self.render();
+                Terminal::move_cursor_to(self.cursor_position.view_height(&self.screen_offset))
+                    .unwrap();
+                Terminal::show_cursor().unwrap();
+            } else {
+                Terminal::move_cursor_to(self.cursor_position).unwrap();
+            }
+            Terminal::execute().unwrap();
         }
     }
 
@@ -548,6 +560,7 @@ impl View {
                         {
                             self.handle_offset_screen_snap();
                         }
+                        return;
                     }
                     JumpCommand::Exit => return,
                     JumpCommand::NoAction => continue,
@@ -569,10 +582,11 @@ impl View {
 
     fn handle_offset_screen_snap(&mut self) {
         // updates the offset when offset adjustment is > 1
-        if self
-            .cursor_position
-            .below_view(&self.screen_offset, &self.size, 1)
-        {
+        if self.cursor_position.below_view(
+            &self.screen_offset,
+            &self.size,
+            !(self.search.render_search | self.help_indicator.render_help) as usize + 1,
+        ) {
             self.screen_offset.set_height(min(
                 self.buffer
                     .text
@@ -614,10 +628,11 @@ impl View {
 
     fn update_offset_single_move(&mut self) {
         //if cursor moves beyond height + offset -> increment height offset
-        if self
-            .cursor_position
-            .below_view(&self.screen_offset, &self.size, 1)
-        {
+        if self.cursor_position.below_view(
+            &self.screen_offset,
+            &self.size,
+            !(self.search.render_search | self.help_indicator.render_help) as usize + 1,
+        ) {
             self.screen_offset.set_height(min(
                 self.screen_offset.height.saturating_add(1),
                 self.cursor_position

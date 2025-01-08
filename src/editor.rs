@@ -152,18 +152,11 @@ impl Editor {
         } else if self.view.needs_redraw {
             self.view.render();
         }
-        Terminal::move_cursor_to(Position {
-            width: self
-                .view
+        Terminal::move_cursor_to(
+            self.view
                 .cursor_position
-                .width
-                .saturating_sub(self.view.screen_offset.width),
-            height: self
-                .view
-                .cursor_position
-                .height
-                .saturating_sub(self.view.screen_offset.height),
-        })?;
+                .view_height(&self.view.screen_offset),
+        )?;
         Terminal::show_cursor()?;
         Terminal::execute()?;
         Ok(())

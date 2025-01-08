@@ -183,12 +183,16 @@ impl TryFrom<Event> for VimModeCommands {
     type Error = String;
     fn try_from(event: Event) -> Result<Self, Self::Error> {
         match event {
-            Event::Key(KeyEvent { code, .. }) => match code {
-                KeyCode::Char('l') => Ok(Self::Move(Direction::Left)),
-                KeyCode::Char('k') => Ok(Self::Move(Direction::Up)),
-                KeyCode::Char('j') => Ok(Self::Move(Direction::Down)),
-                KeyCode::Char('h') => Ok(Self::Move(Direction::Right)),
-                KeyCode::Esc => Ok(Self::Exit),
+            Event::Key(KeyEvent {
+                code, modifiers, ..
+            }) => match (code, modifiers) {
+                (KeyCode::Char('4'), KeyModifiers::SHIFT) => Ok(Self::Move(Direction::End)), //represents $
+                (KeyCode::Char('h'), _) => Ok(Self::Move(Direction::Left)),
+                (KeyCode::Char('k'), _) => Ok(Self::Move(Direction::Up)),
+                (KeyCode::Char('j'), _) => Ok(Self::Move(Direction::Down)),
+                (KeyCode::Char('l'), _) => Ok(Self::Move(Direction::Right)),
+                (KeyCode::Char('0'), _) => Ok(Self::Move(Direction::Home)),
+                (KeyCode::Esc, _) => Ok(Self::Exit),
                 _ => Ok(Self::NoAction),
             },
             _ => Ok(Self::NoAction),

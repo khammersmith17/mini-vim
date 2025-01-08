@@ -7,13 +7,13 @@ use std::io::{stdout, Error, Write};
 /// This also handles edge cases
 /// Handles the ambiguity between what crossterm accepts accross different methods
 
-#[derive(Copy, Clone, Default, PartialEq)]
+#[derive(Copy, Clone, Default, PartialEq, Debug)]
 pub struct Size {
     pub height: usize,
     pub width: usize,
 }
 
-#[derive(Copy, Clone, Default, PartialEq)]
+#[derive(Copy, Clone, Default, PartialEq, Debug)]
 pub struct Position {
     pub width: usize,
     pub height: usize,
@@ -30,6 +30,30 @@ impl Position {
     pub fn set_position(&mut self, new: Position) {
         self.set_height(new.height);
         self.set_width(new.width);
+    }
+
+    pub fn max_displacement_from_view(
+        &self,
+        offset: &Position,
+        size: &Size,
+        reserved_lines: usize,
+    ) -> usize {
+        let width_displacement: usize = if self.width < offset.width {
+            offset.width - self.width
+        } else if self.width >= offset.width + size.width {
+            self.width - offset.width + size.width
+        } else {
+            0_usize
+        };
+        let height_displacement: usize = if self.height < offset.height {
+            offset.height - self.height
+        } else if self.height >= offset.height + size.height - reserved_lines {
+            self.height - (offset.height + size.height - reserved_lines)
+        } else {
+            0_usize
+        };
+
+        std::cmp::max(height_displacement, width_displacement)
     }
 
     /*
@@ -69,8 +93,8 @@ impl Position {
         true
     }
 
-    pub fn height_in_view(&self, offset: &Position, size: &Size, size_offset: usize) -> bool {
-        if self.above_view(offset) | self.below_view(offset, size, size_offset) {
+    pub fn height_in_view(&self, offset: &Position, size: &Size, reserved_lines: usize) -> bool {
+        if self.above_view(offset) | self.below_view(offset, size, reserved_lines) {
             return false;
         }
         true
@@ -83,8 +107,8 @@ impl Position {
         false
     }
 
-    pub fn below_view(&self, offset: &Position, size: &Size, size_height_offset: usize) -> bool {
-        if self.height >= offset.height + size.height.saturating_sub(size_height_offset) {
+    pub fn below_view(&self, offset: &Position, size: &Size, reserved_lines: usize) -> bool {
+        if self.height >= offset.height + size.height.saturating_sub(reserved_lines) {
             return true;
         }
         false
@@ -261,5 +285,124 @@ impl Terminal {
     fn leave_alternate_screen() -> Result<(), Error> {
         Self::queue_command(terminal::LeaveAlternateScreen)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_pos_in_view() {
+        //testing a position in the view
+        let size1 = Size {
+            height: 20,
+            width: 20,
+        };
+        let offset1 = Position {
+            height: 1,
+            width: 1,
+        };
+        let pos1 = Position {
+            height: 12,
+            width: 12,
+        };
+
+        assert_eq!(pos1.max_displacement_from_view(&offset1, &size1, 1), 0);
+    }
+
+    #[test]
+    fn test_displacement_height_1() {
+        //testing a position in the view
+        let size1 = Size {
+            height: 20,
+            width: 20,
+        };
+        let offset1 = Position {
+            height: 1,
+            width: 1,
+        };
+        let pos1 = Position {
+            height: 0,
+            width: 12,
+        };
+
+        assert_eq!(pos1.max_displacement_from_view(&offset1, &size1, 1), 1);
+    }
+
+    #[test]
+    fn test_displacement_height_2() {
+        //testing a position in the view
+        let size1 = Size {
+            height: 20,
+            width: 20,
+        };
+        let offset1 = Position {
+            height: 2,
+            width: 2,
+        };
+        let pos1 = Position {
+            height: 0,
+            width: 12,
+        };
+
+        assert_eq!(pos1.max_displacement_from_view(&offset1, &size1, 1), 2);
+    }
+
+    #[test]
+    fn test_displacement_width_1() {
+        //testing a position in the view
+        let size1 = Size {
+            height: 20,
+            width: 20,
+        };
+        let offset1 = Position {
+            height: 1,
+            width: 0,
+        };
+        let pos1 = Position {
+            height: 0,
+            width: 12,
+        };
+
+        assert_eq!(pos1.max_displacement_from_view(&offset1, &size1, 1), 1);
+    }
+
+    #[test]
+    fn test_displacement_width_2() {
+        //testing a position in the view
+        let size1 = Size {
+            height: 20,
+            width: 20,
+        };
+        let offset1 = Position {
+            height: 1,
+            width: 2,
+        };
+        let pos1 = Position {
+            height: 0,
+            width: 0,
+        };
+
+        assert_eq!(pos1.max_displacement_from_view(&offset1, &size1, 1), 2);
+    }
+
+    #[test]
+    fn test_displacement_height_and_width() {
+        //testing a position in the view
+        let size1 = Size {
+            height: 20,
+            width: 20,
+        };
+        let offset1 = Position {
+            height: 9,
+            width: 8,
+        };
+        let pos1 = Position {
+            height: 0,
+            width: 6,
+        };
+
+        assert_eq!(pos1.max_displacement_from_view(&offset1, &size1, 1), 9);
     }
 }
