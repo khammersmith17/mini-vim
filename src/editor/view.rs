@@ -25,7 +25,6 @@ const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// the core logic
 pub struct View {
     pub buffer: Buffer,
-    pub needs_redraw: bool,
     pub size: Size,
     pub cursor_position: Position,
     pub screen_offset: Position,
@@ -34,6 +33,7 @@ pub struct View {
     theme: Theme,
     clipboard: ClipboardContext,
     highlight: Highlight,
+    pub needs_redraw: bool,
 }
 
 impl Default for View {
@@ -445,6 +445,7 @@ impl View {
                         }
                         _ => continue,
                     },
+                    VimModeCommands::Resize(size) => self.resize(size),
                     VimModeCommands::Exit => return,
                     VimModeCommands::NoAction => continue, // skipping other
                 },
