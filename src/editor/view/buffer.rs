@@ -307,17 +307,17 @@ impl Buffer {
         self.is_saved = false;
     }
 
-    pub fn split_line(&mut self, line_index: usize, width_index: usize) {
+    pub fn split_line(&mut self, pos: &Position) {
         let new_line = self
             .text
-            .get(line_index)
+            .get(pos.height)
             .expect("Out of bounds error")
             .string
-            .get(width_index..)
+            .get(pos.width..)
             .expect("Out of bounds error");
 
         self.text.insert(
-            line_index.saturating_add(1),
+            pos.height.saturating_add(1),
             Line {
                 string: new_line.to_vec(),
                 raw_string: String::new(),
@@ -325,13 +325,13 @@ impl Buffer {
         );
 
         self.text
-            .get_mut(line_index)
+            .get_mut(pos.height)
             .expect("Out of bounds error")
             .string
-            .truncate(width_index);
+            .truncate(pos.width);
 
         self.text
-            .get_mut(line_index.saturating_add(1))
+            .get_mut(pos.height.saturating_add(1))
             .expect("Out of bounds error")
             .generate_raw_string();
 

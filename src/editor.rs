@@ -76,7 +76,9 @@ impl Editor {
                                         if self.view.buffer.filename.is_none() {
                                             self.view.get_file_name();
                                         }
-                                        self.view.buffer.save();
+                                        if self.view.buffer.filename.is_some() {
+                                            self.view.buffer.save();
+                                        }
                                     }
                                     true => {
                                         Terminal::clear_screen().unwrap();

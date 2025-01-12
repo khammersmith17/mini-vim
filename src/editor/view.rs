@@ -190,6 +190,8 @@ impl View {
         }
     }
 
+    // inlining because we are just generating a string
+    #[inline]
     fn get_welcome_message(&self) -> String {
         let mut welcome_message = format!("{PROGRAM_NAME} editor -- version {PROGRAM_VERSION}");
         let width = self.size.width;
@@ -212,6 +214,8 @@ impl View {
         welcome_message
     }
 
+    // inlining because it is a rather straight forward computation
+    #[inline]
     pub fn move_cursor(&mut self, key_code: Direction) {
         if !self.buffer.is_empty() {
             match key_code {
@@ -315,11 +319,13 @@ impl View {
         self.buffer.is_saved = false;
     }
 
+    #[inline]
     fn insert_tab(&mut self) {
         self.buffer.insert_tab(&self.cursor_position);
         self.cursor_position.width = self.cursor_position.width.saturating_add(4);
     }
 
+    #[inline]
     fn delete_char(&mut self) {
         //get the width of the char being deleted to update the cursor position
         self.buffer.update_line_delete(&mut self.cursor_position);
@@ -345,6 +351,7 @@ impl View {
                     }
                     FileNameCommand::SaveFileName => break,
                     FileNameCommand::NoAction => continue,
+                    FileNameCommand::Quit => return,
                 },
                 _ => continue,
             }
@@ -416,7 +423,6 @@ impl View {
             EditorCommand::Delete => self.deletion(),
             EditorCommand::NewLine => {
                 self.new_line();
-                self.handle_offset_screen_snap();
             }
             EditorCommand::Help => {
                 self.help_indicator.render_help = true;
@@ -451,9 +457,6 @@ impl View {
                 },
                 Err(_) => continue, //ignoring error
             }
-            //TODO:
-            //clean this up
-            //screen offset is not being updated correctly here
             if self.needs_redraw {
                 Terminal::clear_screen().unwrap();
                 Terminal::hide_cursor().unwrap();
@@ -471,24 +474,26 @@ impl View {
 
     fn new_line(&mut self) {
         let grapheme_len = if !self.buffer.is_empty() {
-            self.buffer
-                .text
-                .get(self.cursor_position.height)
-                .expect("Out of bounds error")
-                .grapheme_len()
+            self.buffer.text[self.cursor_position.height].grapheme_len()
         } else {
             0
         };
 
+        // if at end of current line -> new blank line
+        // otherwise move all text right of cursor to new line
         if self.cursor_position.width == grapheme_len {
             self.buffer.new_line(self.cursor_position.height);
         } else {
-            self.buffer
-                .split_line(self.cursor_position.height, self.cursor_position.width);
+            self.buffer.split_line(&self.cursor_position);
         }
 
         self.cursor_position
             .down(1, self.buffer.len().saturating_sub(1));
+        // if prev line starts with a tab -> this line starts with a tab
+        // TODO:
+        // get number of spaces that the prev line starts with
+        // floor divide by 4 -> new line starts with this many tabs
+        // up to some ceiling
         self.cursor_position.width = if self.buffer.is_tab(&Position {
             height: self.cursor_position.height,
             width: 4,
@@ -497,8 +502,18 @@ impl View {
         } else {
             0
         };
+        match self.cursor_position.max_displacement_from_view(
+            &self.screen_offset,
+            &self.size,
+            !(self.help_indicator.render_help | self.search.render_search) as usize + 1,
+        ) {
+            0 => return,
+            1 => self.update_offset_single_move(),
+            _ => self.handle_offset_screen_snap(),
+        }
     }
 
+    #[inline]
     fn deletion(&mut self) {
         if self.buffer.is_empty() {
             return;
@@ -514,19 +529,31 @@ impl View {
                     self.cursor_position.up(1);
                     self.cursor_position
                         .set_width(self.buffer.text[self.cursor_position.height].grapheme_len());
-                    self.handle_offset_screen_snap();
                 }
                 _ => {
+                    // get length of 1 line above
+                    // this will be new width after join line operation
+                    let prev_line_width = self.buffer.text
+                        [self.cursor_position.height.saturating_sub(1)]
+                    .grapheme_len();
                     self.buffer.join_line(self.cursor_position.height);
                     self.cursor_position.up(1);
-                    self.cursor_position
-                        .set_width(self.buffer.text[self.cursor_position.height].grapheme_len());
+                    self.cursor_position.set_width(prev_line_width);
                 }
             },
             _ => {
                 self.delete_char();
             }
         };
+        match self.cursor_position.max_displacement_from_view(
+            &self.screen_offset,
+            &self.size,
+            !(self.help_indicator.render_help | self.search.render_search) as usize + 1,
+        ) {
+            0 => return,
+            1 => self.update_offset_single_move(),
+            _ => self.handle_offset_screen_snap(),
+        }
     }
 
     fn jump_cursor(&mut self) {
@@ -781,6 +808,7 @@ impl View {
         self.render();
     }
 
+    #[inline]
     fn revert_screen_state(&mut self) {
         self.cursor_position = self.search.previous_position;
         self.screen_offset = self.search.previous_offset;
@@ -942,6 +970,7 @@ impl View {
         self.highlight.clean_up();
     }
 
+    #[inline]
     fn copy_text_to_clipboard(&mut self, content: String) {
         self.clipboard.set_contents(content).unwrap();
     }
