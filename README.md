@@ -23,39 +23,39 @@ Ctrl-c = Help\
 Ctrl-f = Search\
 Ctrl-t = Theme\
 Ctrl-v = paste text\
-Ctrl-j = Jump Cursor Mode\
+Ctrl-j = Jump Cursor Mode
 
 ## Search Mode
-Type text to search. The cursor will move to the first match. All search hits will be highlighted. The screen state will revert to pre search state when there are no matches.
-Ctrl-n = Move to next match.
-Ctrl-p = Move to previous match
-Esc = Revert screen state to pre search.
+Type text to search. The cursor will move to the first match. All search hits will be highlighted. The screen state will revert to pre search state when there are no matches.\
+Ctrl-n = Move to next match.\
+Ctrl-p = Move to previous match\
+Esc = Revert screen state to pre search.\
 Enter = assume current screen state in search
 
 ## Save as Mode
-This mode will be engaged if the current working file has no filename associated.
-Enter the filename when prompted.
-Enter - Save filename.
+This mode will be engaged if the current working file has no filename associated.\
+Enter the filename when prompted.\
+Enter - Save filename.\
 
 ## Theme Mode
-The first screen will be to set the text color.
-The second screen will be to set the background color.
+The first screen will be to set the text color.\
+The second screen will be to set the background color.\
 Move the cursor up or down, and select enter when the cursor is on the color you want for the respective settings.
 
 ## Highlight Mode
-Move the cursor to highlight text with the arrows.
-Ctrl-c = copy text
-Backspace = delete text
-Esc = revert to pre highlight screen state
+Move the cursor to highlight text with the arrows.\
+Ctrl-c = copy text\
+Backspace = delete text\
+Esc = revert to pre highlight screen state\
 
 ## Vim Mode
-Right now the only support keys are h, j, k, l, 0, $. gg and GG are being added. Vim motions will also be available in highlight mode as well soon.
-h = left
-j = down
-k = up
-l = right
-0 = snap left
-$ = snap right
+Right now the only support keys are h, j, k, l, 0, $. gg and GG are being added. Vim motions will also be available in highlight mode as well soon.\
+h = left\
+j = down\
+k = up\
+l = right\
+0 = snap left\
+$ = snap right\
 Esc = exit vim mode
 
 ## Jump Cursor Mode
