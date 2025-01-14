@@ -13,17 +13,17 @@ If there are changes to the file state when trying to exit, a message will appea
 
 ## Normal Mode Commands
 Like other terminal based text editors, there are a number of commands.\
-Ctrl-q = Quit
-Ctrl-l = Snap cursor to end of line
-Ctrl-u = Snap cursor to first line
-Ctrl-d = Snap cursor to last line
-Ctrl-r = Snap cursor to first line
-Ctrl-w = Save
-Ctrl-c = Help
-Ctrl-f = Search
-Ctrl-t = Theme
-Ctrl-v = paste text
-Ctrl-j = Jump Cursor Mode
+Ctrl-q = Quit\
+Ctrl-l = Snap cursor to end of line\
+Ctrl-u = Snap cursor to first line\
+Ctrl-d = Snap cursor to last line\
+Ctrl-r = Snap cursor to first line\
+Ctrl-w = Save\
+Ctrl-c = Help\
+Ctrl-f = Search\
+Ctrl-t = Theme\
+Ctrl-v = paste text\
+Ctrl-j = Jump Cursor Mode\
 
 ## Search Mode
 Type text to search. The cursor will move to the first match. All search hits will be highlighted. The screen state will revert to pre search state when there are no matches.
