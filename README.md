@@ -35,7 +35,7 @@ Enter = assume current screen state in search
 ## Save as Mode
 This mode will be engaged if the current working file has no filename associated.\
 Enter the filename when prompted.\
-Enter - Save filename.\
+Enter - Save filename.
 
 ## Theme Mode
 The first screen will be to set the text color.\
@@ -46,7 +46,7 @@ Move the cursor up or down, and select enter when the cursor is on the color you
 Move the cursor to highlight text with the arrows.\
 Ctrl-c = copy text\
 Backspace = delete text\
-Esc = revert to pre highlight screen state\
+Esc = revert to pre highlight screen state
 
 ## Vim Mode
 Right now the only support keys are h, j, k, l, 0, $. gg and GG are being added. Vim motions will also be available in highlight mode as well soon.\
