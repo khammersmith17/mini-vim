@@ -1,12 +1,10 @@
-use super::terminal::{Position, Size, Terminal};
+use super::editorcommands::{
+    Direction, EditorCommand, FileNameCommand, HighlightCommand, JumpCommand, VimModeCommands,
+};
+use super::terminal::{Coordinate, Mode, Position, ScreenOffset, Size, Terminal};
 use clipboard::{ClipboardContext, ClipboardProvider};
 use crossterm::event::read;
-use std::time::Instant;
-mod buffer;
-use super::editorcommands::{
-    Direction, EditorCommand, FileNameCommand, HighlightCommand, JumpCommand, SearchCommand,
-    VimModeCommands,
-};
+pub mod buffer;
 use buffer::Buffer;
 use std::cmp::min;
 pub mod line;
@@ -18,22 +16,22 @@ pub mod help;
 use help::Help;
 mod highlight;
 use highlight::{Highlight, HighlightOrientation};
+mod vim_mode;
+use vim_mode::VimMode;
 
-const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
-const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
+pub const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// the core logic
 pub struct View {
-    pub buffer: Buffer,
     pub size: Size,
     pub cursor_position: Position,
-    pub screen_offset: Position,
-    help_indicator: Help,
-    search: Search,
+    pub screen_offset: ScreenOffset,
     theme: Theme,
     clipboard: ClipboardContext,
     highlight: Highlight,
     pub needs_redraw: bool,
+    pub buffer: Buffer,
 }
 
 impl Default for View {
@@ -43,9 +41,7 @@ impl Default for View {
             needs_redraw: true,
             size: Terminal::size().unwrap_or_default(),
             cursor_position: Position::default(),
-            screen_offset: Position::default(),
-            help_indicator: Help::default(),
-            search: Search::default(),
+            screen_offset: ScreenOffset::default(),
             theme: Theme::default(),
             clipboard: ClipboardProvider::new().unwrap(),
             highlight: Highlight::default(),
@@ -58,28 +54,16 @@ impl View {
         if (self.size.width == 0) | (self.size.height == 0) {
             return;
         }
-        let screen_cut = if self.help_indicator.render_help | self.search.render_search {
-            2
-        } else {
-            1
-        };
 
         #[allow(clippy::integer_division)]
-        for current_row in
-            self.screen_offset.height..self.screen_offset.height + self.size.height - screen_cut
+        for current_row in self.screen_offset.height
+            ..self
+                .screen_offset
+                .height
+                .saturating_add(self.size.height)
+                .saturating_sub(1)
         {
-            let relative_row = current_row - self.screen_offset.height;
-            if self.search.render_search && self.search.line_indicies.contains(&current_row) {
-                self.search.render_search_line(
-                    current_row,
-                    &self.buffer,
-                    &self.screen_offset,
-                    &self.size,
-                    self.theme.search_highlight,
-                    self.theme.search_text,
-                );
-                continue;
-            }
+            let relative_row = current_row.saturating_sub(self.screen_offset.height);
 
             if self.highlight.render & self.highlight.line_range.contains(&current_row) {
                 // going to handle rendering these lines with the highlight range
@@ -88,7 +72,7 @@ impl View {
             }
 
             if let Some(line) = self.buffer.text.get(current_row) {
-                self.render_line(
+                Self::render_line(
                     relative_row,
                     line.get_line_subset(
                         self.screen_offset.width
@@ -96,91 +80,57 @@ impl View {
                     ),
                 );
             } else if self.buffer.is_empty() & (current_row == self.size.height / 3) {
-                self.render_line(relative_row, &self.get_welcome_message());
+                Self::render_line(
+                    relative_row,
+                    Terminal::get_welcome_message(&self.size, &self.screen_offset),
+                );
             } else {
-                self.render_line(relative_row, "~");
+                Self::render_line(relative_row, "~");
             }
-        }
-
-        if self.search.render_search {
-            self.search.render_search_string(&self.size);
-        }
-
-        if self.help_indicator.render_help {
-            self.render_help_line(self.size.height, self.size.width);
         }
 
         // TODO:
         // when in highlight mode consider end
         // when in normal mode consider the position
         if self.highlight.render {
-            self.render_file_info(
-                self.highlight.end.height - self.screen_offset.height + self.size.height,
-            );
+            Terminal::render_status_line(
+                Mode::Highlight,
+                self.buffer.is_saved,
+                &self.size,
+                self.buffer.filename.as_deref(),
+                Some((
+                    self.cursor_position.height.saturating_add(1),
+                    self.buffer.len(),
+                )),
+            )
+            .unwrap();
         } else {
-            self.render_file_info(
-                self.cursor_position.height - self.screen_offset.height + self.size.height,
-            );
+            Terminal::render_status_line(
+                Mode::Insert,
+                self.buffer.is_saved,
+                &self.size,
+                self.buffer.filename.as_deref(),
+                Some((self.cursor_position.height, self.buffer.len())),
+            )
+            .unwrap();
         }
 
         self.needs_redraw = false;
     }
 
-    fn render_help_line(&mut self, height: usize, width: usize) {
-        if self.help_indicator.render_help
-            & (Instant::now()
-                .duration_since(self.help_indicator.time_began)
-                .as_secs()
-                < 5)
-        {
-            let mut render_message = format!(
-                "HELP: {} | {} | {} | {} | {} | {}",
-                "Ctrl-w = save",
-                "Ctrl-q = quit",
-                "Ctrl-j = jump-to",
-                "Ctrl-f = search",
-                "Ctrl-u = snap-up",
-                "Ctrl-d = snap-down"
-            );
-            render_message.truncate(width);
-            self.render_line(height.saturating_sub(2), &render_message);
-        } else {
-            self.help_indicator.render_help = false;
-        }
-    }
-
-    fn render_file_info(&mut self, height: usize) {
-        let saved = if !self.buffer.is_saved {
-            "modified"
-        } else {
-            "saved"
-        };
-        let filename = match &self.buffer.filename {
-            Some(file) => file,
-            None => "-",
-        };
-        let render_message = if !self.buffer.is_empty() {
-            format!(
-                "Filename: {} | Status: {} | Line: {} / {}",
-                filename,
-                saved,
-                self.cursor_position.height.saturating_add(1),
-                self.buffer.len()
-            )
-        } else {
-            format!("Filename: {} | Status: {} | Line: -", filename, saved)
-        };
-
-        self.render_line(height.saturating_sub(1), &render_message);
-    }
-
-    pub fn render_line<T: std::fmt::Display>(&self, row: usize, line: T) {
+    pub fn render_line<T: std::fmt::Display>(row: usize, line: T) {
         let result = Terminal::render_line(row, line);
-        debug_assert!(result.is_ok(), "Failed to render line")
+        debug_assert!(result.is_ok(), "Failed to render line");
     }
+
     pub fn resize(&mut self, size: Size) {
         self.size = size;
-        self.handle_offset_screen_snap();
+        self.screen_offset.handle_offset_screen_snap(
+            &self.cursor_position,
+            &self.size,
+            1,
+            self.buffer.len(),
+        );
     }
 
     pub fn load(&mut self, filename: &str) {
@@ -190,125 +140,31 @@ impl View {
         }
     }
 
-    // inlining because we are just generating a string
-    #[inline]
-    fn get_welcome_message(&self) -> String {
-        let mut welcome_message = format!("{PROGRAM_NAME} editor -- version {PROGRAM_VERSION}");
-        let width = self.size.width;
-        let len = welcome_message.len();
-        #[allow(clippy::integer_division)]
-        let padding = (width.saturating_sub(len)) / 2;
-
-        let spaces = " ".repeat(padding.saturating_sub(1));
-        welcome_message = format!("~{spaces}{welcome_message}");
-        welcome_message.truncate(width);
-        let range = self.screen_offset.width
-            ..min(
-                self.screen_offset.width.saturating_add(self.size.width),
-                welcome_message.len(),
-            );
-        welcome_message = match welcome_message.get(range) {
-            Some(text) => text.to_string(),
-            None => "".to_string(),
-        };
-        welcome_message
-    }
-
     // inlining because it is a rather straight forward computation
     #[inline]
     pub fn move_cursor(&mut self, key_code: Direction) {
-        if !self.buffer.is_empty() {
-            match key_code {
-                //if not on last line, move down
-                //if the next line is shorter, snap to the end of that line
-                Direction::Down => {
-                    self.cursor_position
-                        .down(1, self.buffer.len().saturating_sub(1));
-                    self.cursor_position.resolve_width(
-                        self.buffer.text[self.cursor_position.height].grapheme_len(),
-                    );
-                }
-                //if we are not in row 0, move up
-                //if the line above is shorter than the previous line, snap to the end
-                Direction::Up => {
-                    self.cursor_position.up(1);
-                    self.cursor_position.resolve_width(
-                        self.buffer.text[self.cursor_position.height].grapheme_len(),
-                    );
-                }
-                //move left
-                //if we are at 0,0 no action
-                //if we are at width 0, snap to the right end of the previous line
-                //else move left 1
-                Direction::Left => {
-                    match (
-                        self.cursor_position.at_left_edge(),
-                        self.cursor_position.at_top(),
-                    ) {
-                        (true, false) => {
-                            self.cursor_position.up(1);
-                            self.cursor_position.snap_right(
-                                self.buffer.text[self.cursor_position.height].grapheme_len(),
-                            );
-                        }
-                        _ => {
-                            self.cursor_position.left(1);
-                        }
-                    }
-                }
-                //if we are on the last line at the -1 position of the text, do nothing
-                //if we are at the end of the line, snap to position 0 on the next line
-                //else move right 1 char
-                Direction::Right => {
-                    let grapheme_len = self.buffer.text[self.cursor_position.height].grapheme_len();
-                    let text_height = self.buffer.len().saturating_sub(1);
-
-                    match (
-                        self.cursor_position.at_max_width(grapheme_len),
-                        self.cursor_position.at_max_height(text_height),
-                    ) {
-                        (true, false) => {
-                            self.cursor_position.down(1, text_height);
-                            self.cursor_position.snap_left();
-                        }
-                        _ => self.cursor_position.right(1, grapheme_len),
-                    };
-                }
-                //move to last line, cursor width will stay the same
-                Direction::PageDown => {
-                    self.cursor_position
-                        .page_down(self.buffer.len().saturating_sub(1));
-                }
-                //move to the first line, cursor width stays the same
-                Direction::PageUp => {
-                    self.cursor_position.page_up();
-                }
-                //move to end of current line
-                Direction::End => {
-                    self.cursor_position
-                        .snap_right(self.buffer.text[self.cursor_position.height].grapheme_len());
-                }
-                //move to start of current line
-                Direction::Home => {
-                    self.cursor_position.snap_left();
-                }
-            }
-
-            let dis = self.cursor_position.max_displacement_from_view(
-                &self.screen_offset,
-                &self.size,
-                !(self.search.render_search | self.help_indicator.render_help) as usize + 1,
-            );
-            if dis == 1 {
-                self.update_offset_single_move();
-                self.needs_redraw = true;
-            } else if dis > 1 {
-                self.handle_offset_screen_snap();
-                self.needs_redraw = true;
-            }
-        } else {
+        if self.buffer.is_empty() {
             self.cursor_position.page_up();
             self.cursor_position.snap_left();
+        } else {
+            key_code.move_cursor(&mut self.cursor_position, &self.buffer);
+
+            let dis =
+                self.cursor_position
+                    .max_displacement_from_view(&self.screen_offset, &self.size, 2);
+            if dis == 1 {
+                self.screen_offset
+                    .update_offset_single_move(&self.cursor_position, &self.size, 1);
+                self.needs_redraw = true;
+            } else if dis > 1 {
+                self.screen_offset.handle_offset_screen_snap(
+                    &self.cursor_position,
+                    &self.size,
+                    1,
+                    self.buffer.len(),
+                );
+                self.needs_redraw = true;
+            }
         }
     }
 
@@ -335,7 +191,7 @@ impl View {
         // clear_screen and render screen to get file name
         let mut filename_buffer = String::new();
         let mut curr_position: usize = 10;
-        self.render_filename_screen(&filename_buffer, curr_position);
+        Self::render_filename_screen(&filename_buffer, curr_position);
         loop {
             let Ok(read_event) = read() else { continue };
 
@@ -343,7 +199,7 @@ impl View {
                 Ok(event) => match event {
                     FileNameCommand::Insert(c) => {
                         filename_buffer.push(c);
-                        curr_position += 1;
+                        curr_position = curr_position.saturating_add(1);
                     }
                     FileNameCommand::BackSpace => {
                         filename_buffer.pop();
@@ -356,14 +212,14 @@ impl View {
                 _ => continue,
             }
 
-            self.render_filename_screen(&filename_buffer, curr_position);
+            Self::render_filename_screen(&filename_buffer, curr_position);
         }
 
         self.buffer.assume_file_name(filename_buffer);
         self.needs_redraw = true;
     }
 
-    fn render_filename_screen(&self, curr_filename: &str, curr_position: usize) {
+    fn render_filename_screen(curr_filename: &str, curr_position: usize) {
         Terminal::hide_cursor().unwrap();
         Terminal::move_cursor_to(Position {
             height: 0,
@@ -371,7 +227,7 @@ impl View {
         })
         .unwrap();
         Terminal::clear_screen().unwrap();
-        self.render_line(0, &format!("Filename: {}", &curr_filename));
+        Self::render_line(0, format!("Filename: {}", &curr_filename));
         Terminal::move_cursor_to(Position {
             height: 0,
             width: curr_position,
@@ -401,22 +257,29 @@ impl View {
             EditorCommand::Paste => {
                 let paste_text = self.clipboard.get_contents().unwrap();
                 self.buffer
-                    .add_text_from_clipboard(paste_text, &mut self.cursor_position);
+                    .add_text_from_clipboard(&paste_text, &mut self.cursor_position);
             }
             EditorCommand::Highlight => {
                 self.highlight.render = true;
                 self.handle_highlight();
             }
             EditorCommand::Search => {
-                if self.help_indicator.render_help {
-                    self.help_indicator.render_help = false;
-                }
-                self.search.render_search = true;
-                self.handle_search();
+                let mut search = Search::new(
+                    self.cursor_position,
+                    self.screen_offset,
+                    self.theme.highlight,
+                    self.theme.text,
+                );
+                search.run(
+                    &mut self.cursor_position,
+                    &mut self.screen_offset,
+                    &mut self.size,
+                    &self.buffer,
+                );
             }
             EditorCommand::Insert(char) => {
                 self.insert_char(char);
-                self.update_offset_single_move();
+                self.check_offset();
             }
             EditorCommand::Tab => self.insert_tab(),
             EditorCommand::JumpLine => self.jump_cursor(),
@@ -425,15 +288,28 @@ impl View {
                 self.new_line();
             }
             EditorCommand::Help => {
-                self.help_indicator.render_help = true;
-                self.help_indicator.time_began = Instant::now();
+                Help::render_help(&mut self.size);
             }
-            EditorCommand::VimMode => self.enter_vim_mode(),
+            EditorCommand::VimMode => {
+                let mut vim_mode = VimMode::new(
+                    self.cursor_position,
+                    self.screen_offset,
+                    self.size,
+                    &self.buffer,
+                );
+                vim_mode.run(
+                    &mut self.cursor_position,
+                    &mut self.screen_offset,
+                    &mut self.size,
+                );
+                //self.enter_vim_mode()
+            }
             _ => {}
         }
         self.needs_redraw = true;
     }
 
+    /*
     fn enter_vim_mode(&mut self) {
         loop {
             let Ok(read_event) = read() else { continue }; //skipping an error on read cursor action
@@ -460,7 +336,7 @@ impl View {
             if self.needs_redraw {
                 Terminal::clear_screen().unwrap();
                 Terminal::hide_cursor().unwrap();
-                Terminal::move_cursor_to(self.screen_offset).unwrap();
+                Terminal::move_cursor_to(self.screen_offset.to_position()).unwrap();
                 self.render();
                 Terminal::move_cursor_to(self.cursor_position.view_height(&self.screen_offset))
                     .unwrap();
@@ -471,12 +347,13 @@ impl View {
             Terminal::execute().unwrap();
         }
     }
+    */
 
     fn new_line(&mut self) {
-        let grapheme_len = if !self.buffer.is_empty() {
-            self.buffer.text[self.cursor_position.height].grapheme_len()
-        } else {
+        let grapheme_len = if self.buffer.is_empty() {
             0
+        } else {
+            self.buffer.text[self.cursor_position.height].grapheme_len()
         };
 
         // if at end of current line -> new blank line
@@ -502,18 +379,28 @@ impl View {
         } else {
             0
         };
-        match self.cursor_position.max_displacement_from_view(
-            &self.screen_offset,
-            &self.size,
-            !(self.help_indicator.render_help | self.search.render_search) as usize + 1,
-        ) {
-            0 => return,
-            1 => self.update_offset_single_move(),
-            _ => self.handle_offset_screen_snap(),
-        }
+        self.check_offset();
     }
 
     #[inline]
+    fn check_offset(&mut self) {
+        match self
+            .cursor_position
+            .max_displacement_from_view(&self.screen_offset, &self.size, 1)
+        {
+            0 => (),
+            1 => self
+                .screen_offset
+                .update_offset_single_move(&self.cursor_position, &self.size, 1),
+            _ => self.screen_offset.handle_offset_screen_snap(
+                &self.cursor_position,
+                &self.size,
+                1,
+                self.buffer.len(),
+            ),
+        }
+    }
+
     fn deletion(&mut self) {
         if self.buffer.is_empty() {
             return;
@@ -545,15 +432,7 @@ impl View {
                 self.delete_char();
             }
         };
-        match self.cursor_position.max_displacement_from_view(
-            &self.screen_offset,
-            &self.size,
-            !(self.help_indicator.render_help | self.search.render_search) as usize + 1,
-        ) {
-            0 => return,
-            1 => self.update_offset_single_move(),
-            _ => self.handle_offset_screen_snap(),
-        }
+        self.check_offset();
     }
 
     fn jump_cursor(&mut self) {
@@ -565,14 +444,17 @@ impl View {
             width: 0,
         })
         .unwrap();
-        Terminal::render_line(neg_2, format!("{}", render_string)).unwrap();
+        Terminal::render_line(neg_2, render_string.to_string()).unwrap();
         Terminal::execute().unwrap();
 
         loop {
             let Ok(read_event) = read() else { continue }; //skipping errors here
             match JumpCommand::try_from(read_event) {
                 Ok(command) => match command {
-                    JumpCommand::Enter(digit) => line = line * 10 + digit,
+                    JumpCommand::Enter(digit) => {
+                        line = line.saturating_mul(10).saturating_sub(digit);
+                    }
+                    #[allow(clippy::integer_division)]
                     JumpCommand::Delete => line = if line > 9 { line / 10 } else { 0 },
                     JumpCommand::Move => {
                         // if line > buffer.len(), give buffer len
@@ -583,10 +465,15 @@ impl View {
                         };
 
                         if (self.cursor_position.height
-                            > self.size.height + self.screen_offset.height)
+                            > self.size.height.saturating_add(self.screen_offset.height))
                             | (self.cursor_position.height < self.screen_offset.height)
                         {
-                            self.handle_offset_screen_snap();
+                            self.screen_offset.handle_offset_screen_snap(
+                                &self.cursor_position,
+                                &self.size,
+                                1,
+                                self.buffer.len(),
+                            );
                         }
                         return;
                     }
@@ -598,232 +485,14 @@ impl View {
 
             match line {
                 0 => {
-                    let _ = Terminal::render_line(neg_2, &format!("{}", render_string));
+                    let _ = Terminal::render_line(neg_2, &render_string);
                 }
                 _ => {
-                    let _ = Terminal::render_line(neg_2, &format!("{}{}", render_string, line));
+                    let _ = Terminal::render_line(neg_2, &format!("{render_string}{line}"));
                 }
             }
             let _ = Terminal::execute();
         }
-    }
-
-    fn handle_offset_screen_snap(&mut self) {
-        // updates the offset when offset adjustment is > 1
-        if self.cursor_position.below_view(
-            &self.screen_offset,
-            &self.size,
-            !(self.search.render_search | self.help_indicator.render_help) as usize + 1,
-        ) {
-            self.screen_offset.set_height(min(
-                self.buffer
-                    .text
-                    .len()
-                    .saturating_sub(self.size.height)
-                    .saturating_add(2), // leave space for the file info line
-                self.cursor_position
-                    .height
-                    .saturating_sub(self.size.height)
-                    .saturating_add(2),
-            ));
-            if self.search.render_search | self.help_indicator.render_help {
-                self.screen_offset
-                    .set_height(self.screen_offset.height.saturating_add(1));
-            }
-        } else if self.cursor_position.above_view(&self.screen_offset) {
-            self.screen_offset
-                .set_height(self.cursor_position.height.saturating_sub(1));
-        }
-
-        if self.cursor_position.at_top() {
-            self.screen_offset.page_up();
-        }
-
-        if self.cursor_position.at_left_edge() {
-            self.screen_offset.snap_left();
-        }
-
-        if self.cursor_position.width >= self.size.width + self.screen_offset.width {
-            self.screen_offset.width = self
-                .cursor_position
-                .width
-                .saturating_sub(self.size.width)
-                .saturating_add(1);
-        } else if self.cursor_position.width < self.screen_offset.width {
-            self.screen_offset.left(1);
-        }
-    }
-
-    fn update_offset_single_move(&mut self) {
-        //if cursor moves beyond height + offset -> increment height offset
-        if self.cursor_position.below_view(
-            &self.screen_offset,
-            &self.size,
-            !(self.search.render_search | self.help_indicator.render_help) as usize + 1,
-        ) {
-            self.screen_offset.set_height(min(
-                self.screen_offset.height.saturating_add(1),
-                self.cursor_position
-                    .height
-                    .saturating_sub(self.size.height)
-                    .saturating_add(2), // space for file info line
-            ));
-        }
-        // if height moves less than the offset -> decrement height
-        if self.cursor_position.above_view(&self.screen_offset) {
-            self.screen_offset.set_height(self.cursor_position.height);
-        }
-        //if widith less than offset -> decerement width
-        if self.cursor_position.left_of_view(&self.screen_offset) {
-            self.screen_offset.set_width(self.cursor_position.width);
-        }
-        //if width moves outside view by 1 increment
-        if self
-            .cursor_position
-            .right_of_view(&self.screen_offset, &self.size)
-        {
-            //self.screen_offset.width = self.screen_offset.width.saturating_sub(1);
-            self.screen_offset.width = self.screen_offset.width.saturating_add(1);
-        }
-    }
-
-    fn handle_search(&mut self) {
-        self.search
-            .set_previous(&self.cursor_position, &self.screen_offset);
-
-        // keep a stack of search positions so
-        // only need to compute the positions when the user
-        // adds to a search string
-        // when the user removes from the search string
-        // pop the stack
-
-        loop {
-            // on errors or events that dont matter in this context
-            // skip and continue
-            self.render_search();
-            let Ok(read_event) = read() else { continue }; //skipping errors here
-
-            match SearchCommand::try_from(read_event) {
-                Ok(event) => match event {
-                    SearchCommand::Insert(c) => {
-                        // add char to search query
-                        self.search.string.push(c);
-                        self.search
-                            .stack
-                            .push(self.buffer.search(&self.search.string));
-                        self.search.search_index = match self
-                            .search
-                            .find_relative_start(&self.search.previous_position.height)
-                        {
-                            Some(ind) => ind,
-                            None => 0,
-                        };
-                        self.search.set_line_indicies();
-                    }
-                    SearchCommand::Next => {
-                        //snap to next result
-                        if !self.search.stack.is_empty() {
-                            let curr_results =
-                                self.search.stack.get(self.search.stack.len() - 1).unwrap();
-                            self.search.search_index = if curr_results.len().saturating_sub(1)
-                                > self.search.search_index
-                            {
-                                self.search.search_index.saturating_add(1)
-                            } else {
-                                0
-                            };
-                        }
-                    }
-                    SearchCommand::Previous => {
-                        //snap to previous result
-                        if !self.search.stack.is_empty() {
-                            let curr_results =
-                                self.search.stack.get(self.search.stack.len() - 1).unwrap();
-                            self.search.search_index = if self.search.search_index > 0 {
-                                self.search.search_index.saturating_sub(1)
-                            } else {
-                                curr_results.len().saturating_sub(1)
-                            };
-                        }
-                    }
-                    SearchCommand::RevertState => {
-                        //return to pre search screen state
-                        self.revert_screen_state();
-                        break;
-                    }
-                    SearchCommand::AssumeState => {
-                        //assume current state on screen after search
-                        break;
-                    }
-                    SearchCommand::BackSpace => {
-                        // remove char from search query
-                        if !self.search.string.is_empty() {
-                            self.search.string.pop();
-                            self.search.stack.pop();
-                            self.search.search_index = match self
-                                .search
-                                .find_relative_start(&self.search.previous_position.height)
-                            {
-                                Some(ind) => ind,
-                                None => 0,
-                            };
-                            self.search.set_line_indicies();
-                        }
-                    }
-                    SearchCommand::Resize(size) => self.resize(size),
-                    SearchCommand::NoAction => continue,
-                },
-                Err(_) => continue,
-            }
-
-            // no search query
-            if self.search.stack.is_empty() {
-                self.revert_screen_state();
-                continue;
-            }
-
-            // no matches on current search query
-            if self.search.stack[self.search.stack.len() - 1].is_empty() {
-                self.revert_screen_state();
-                continue;
-            }
-
-            //grab the latest search results from the stack
-            //get the search index position
-            self.cursor_position =
-                self.search.stack[self.search.stack.len() - 1][self.search.search_index].clone();
-
-            // if the search position is out of current screen bounds
-            if !self
-                .cursor_position
-                .height_in_view(&self.screen_offset, &self.size, 2)
-                | !self
-                    .cursor_position
-                    .width_in_view(&self.screen_offset, &self.size)
-            {
-                self.handle_offset_screen_snap();
-            }
-        }
-        self.search.clean_up_search();
-        self.render();
-    }
-
-    #[inline]
-    fn revert_screen_state(&mut self) {
-        self.cursor_position = self.search.previous_position;
-        self.screen_offset = self.search.previous_offset;
-    }
-
-    fn render_search(&mut self) {
-        // this largely is the same logic as Editor::refresh_screen
-        // maybe that logic should be called out of view to not reproduce code
-        Terminal::hide_cursor().unwrap();
-        Terminal::move_cursor_to(self.screen_offset).unwrap();
-        Terminal::clear_screen().unwrap();
-        self.render();
-        Terminal::move_cursor_to(self.cursor_position.view_height(&self.screen_offset)).unwrap();
-        Terminal::show_cursor().unwrap();
-        Terminal::execute().unwrap();
     }
 
     fn jump_word(&mut self, dir: Direction) {
@@ -842,13 +511,12 @@ impl View {
         if self.buffer.is_empty() {
             return;
         }
-        self.highlight.end = self.cursor_position.clone();
+        self.highlight.end = self.cursor_position;
         let max_height = self.buffer.len().saturating_sub(1);
         let previous_offset = self.screen_offset;
 
         loop {
             let Ok(read_event) = read() else { continue }; //skipping errors here
-
             match HighlightCommand::try_from(read_event) {
                 Ok(event) => match event {
                     HighlightCommand::Move(dir) => match dir {
@@ -860,9 +528,10 @@ impl View {
                             let at_width = self.highlight.end.at_max_width(max_width);
                             match (at_height, at_width) {
                                 (true, false) => {
-                                    self.highlight
-                                        .end
-                                        .set_height(min(self.highlight.end.height + 1, max_height));
+                                    self.highlight.end.set_height(min(
+                                        self.highlight.end.height.saturating_add(1),
+                                        max_height,
+                                    ));
                                     self.highlight.end.snap_left();
                                 }
                                 (false, false) => self.highlight.end.right(1, max_width),
@@ -941,8 +610,8 @@ impl View {
                 self.highlight.render_single_line(
                     &self.cursor_position,
                     &self.buffer,
-                    self.theme.search_highlight,
-                    self.theme.search_text,
+                    self.theme.highlight,
+                    self.theme.text,
                 );
             } else {
                 self.highlight.multi_line_render(
@@ -950,8 +619,8 @@ impl View {
                     &self.screen_offset,
                     &self.size,
                     &self.buffer,
-                    self.theme.search_highlight,
-                    self.theme.search_text,
+                    self.theme.highlight,
+                    self.theme.text,
                 );
             }
 
@@ -991,11 +660,12 @@ impl View {
             if self.cursor_position.diff_height(&self.highlight.end) > 1 {
                 let range_iter = match self.highlight.or {
                     HighlightOrientation::StartFirst => {
-                        (self.cursor_position.height + 1..self.highlight.end.height).rev()
+                        (self.cursor_position.height.saturating_add(1)..self.highlight.end.height)
+                            .rev()
                     }
-                    HighlightOrientation::EndFirst => {
-                        (self.highlight.end.height + 1..self.cursor_position.height).rev()
-                    }
+                    HighlightOrientation::EndFirst => (self.highlight.end.height.saturating_add(1)
+                        ..self.cursor_position.height)
+                        .rev(),
                 };
 
                 for line in range_iter {
@@ -1021,7 +691,9 @@ impl View {
                     self.buffer.delete_segment(
                         &self.cursor_position,
                         &mut Position {
-                            width: self.buffer.text[self.cursor_position.height].len() - 1,
+                            width: self.buffer.text[self.cursor_position.height]
+                                .len()
+                                .saturating_sub(1),
                             height: self.cursor_position.height,
                         },
                     );
@@ -1033,7 +705,9 @@ impl View {
                     self.buffer.delete_segment(
                         &self.cursor_position,
                         &mut Position {
-                            width: self.buffer.text[self.highlight.end.height].len() - 1,
+                            width: self.buffer.text[self.highlight.end.height]
+                                .len()
+                                .saturating_sub(1),
                             height: self.highlight.end.height,
                         },
                     );

@@ -1,22 +1,137 @@
+use crate::editor::view::{PROGRAM_NAME, PROGRAM_VERSION};
 use crossterm::cursor::{Hide, MoveTo, SetCursorStyle, Show};
 use crossterm::style::{Color, Print, SetBackgroundColor, SetForegroundColor};
 use crossterm::terminal::{self, disable_raw_mode, enable_raw_mode, size, Clear, ClearType};
 use crossterm::{queue, Command};
 use std::io::{stdout, Error, Write};
+
 /// Setting the terminal size and position to usize
 /// This also handles edge cases
 /// Handles the ambiguity between what crossterm accepts accross different methods
 
-#[derive(Copy, Clone, Default, PartialEq, Debug)]
+#[derive(Copy, Clone, Default, Eq, PartialEq, Debug)]
 pub struct Size {
     pub height: usize,
     pub width: usize,
 }
 
-#[derive(Copy, Clone, Default, PartialEq, Debug)]
+///trait for Position and ScreenOffset struct
+///for structs that represent some sort of coordinate
+pub trait Coordinate {
+    fn set_width(&mut self, _val: usize) {}
+
+    fn set_height(&mut self, _val: usize) {}
+
+    fn left(&mut self, _delta: usize) {}
+
+    fn up(&mut self, _delta: usize) {}
+
+    fn right(&mut self, _delta: usize, _max: usize) {}
+
+    fn down(&mut self, _delta: usize, _max: usize) {}
+
+    fn page_up(&mut self) {}
+
+    fn page_down(&mut self, _max: usize) {}
+
+    fn at_max_width(&self, _max_width: usize) -> bool {
+        false
+    }
+
+    fn at_max_height(&self, _max_height: usize) -> bool {
+        false
+    }
+
+    fn at_top(&self) -> bool {
+        false
+    }
+
+    fn at_left_edge(&self) -> bool {
+        false
+    }
+
+    fn snap_right(&mut self, _new_width: usize) {}
+
+    fn snap_left(&mut self) {}
+}
+
+#[derive(Copy, Clone, Default, Eq, PartialEq, Debug)]
 pub struct Position {
     pub width: usize,
     pub height: usize,
+}
+
+// inlining all methods here as they are straight forward computations
+impl Coordinate for Position {
+    #[inline]
+    fn set_width(&mut self, val: usize) {
+        self.width = val;
+    }
+
+    #[inline]
+    fn set_height(&mut self, val: usize) {
+        self.height = val;
+    }
+
+    #[inline]
+    fn left(&mut self, delta: usize) {
+        self.width = self.width.saturating_sub(delta);
+    }
+
+    #[inline]
+    fn up(&mut self, delta: usize) {
+        self.height = self.height.saturating_sub(delta);
+    }
+
+    #[inline]
+    fn right(&mut self, delta: usize, max: usize) {
+        self.width = std::cmp::min(self.width.saturating_add(delta), max);
+    }
+
+    #[inline]
+    fn down(&mut self, delta: usize, max: usize) {
+        self.height = std::cmp::min(self.height.saturating_add(delta), max);
+    }
+
+    #[inline]
+    fn page_up(&mut self) {
+        self.height = 0;
+    }
+
+    #[inline]
+    fn page_down(&mut self, max: usize) {
+        self.height = max;
+    }
+
+    #[inline]
+    fn at_max_width(&self, max_width: usize) -> bool {
+        self.width == max_width
+    }
+
+    #[inline]
+    fn at_max_height(&self, max_height: usize) -> bool {
+        self.height == max_height
+    }
+
+    #[inline]
+    fn at_top(&self) -> bool {
+        self.height == 0
+    }
+
+    #[inline]
+    fn at_left_edge(&self) -> bool {
+        self.width == 0
+    }
+
+    #[inline]
+    fn snap_right(&mut self, new_width: usize) {
+        self.width = new_width;
+    }
+
+    #[inline]
+    fn snap_left(&mut self) {
+        self.width = 0;
+    }
 }
 
 impl Position {
@@ -34,7 +149,7 @@ impl Position {
 
     pub fn max_displacement_from_view(
         &self,
-        offset: &Position,
+        offset: &ScreenOffset,
         size: &Size,
         reserved_lines: usize,
     ) -> usize {
@@ -56,121 +171,207 @@ impl Position {
         std::cmp::max(height_displacement, width_displacement)
     }
 
-    /*
-    pub fn diff_width(&self, other: &Position) -> usize {
-        if self.height > other.height {
-            return self.width - other.width;
-        }
-        other.width - self.width
-    }
-    */
-
-    pub fn view_height(&self, offset: &Position) -> Position {
+    pub fn view_height(&self, offset: &ScreenOffset) -> Position {
         Position {
             height: self.height.saturating_sub(offset.height),
             width: self.width,
         }
     }
 
-    pub fn right_of_view(&self, offset: &Position, size: &Size) -> bool {
+    pub fn right_of_view(&self, offset: &ScreenOffset, size: &Size) -> bool {
         if self.width > offset.width + size.width {
             return true;
         }
         false
     }
 
-    pub fn left_of_view(&self, offset: &Position) -> bool {
+    pub fn left_of_view(&self, offset: &ScreenOffset) -> bool {
         if self.width < offset.width {
             return true;
         }
         false
     }
 
-    pub fn width_in_view(&self, offset: &Position, size: &Size) -> bool {
+    pub fn width_in_view(&self, offset: &ScreenOffset, size: &Size) -> bool {
         if self.left_of_view(offset) | self.right_of_view(offset, size) {
             return false;
         }
         true
     }
 
-    pub fn height_in_view(&self, offset: &Position, size: &Size, reserved_lines: usize) -> bool {
+    pub fn height_in_view(
+        &self,
+        offset: &ScreenOffset,
+        size: &Size,
+        reserved_lines: usize,
+    ) -> bool {
         if self.above_view(offset) | self.below_view(offset, size, reserved_lines) {
             return false;
         }
         true
     }
 
-    pub fn above_view(&self, offset: &Position) -> bool {
+    pub fn above_view(&self, offset: &ScreenOffset) -> bool {
         if self.height < offset.height {
             return true;
         }
         false
     }
 
-    pub fn below_view(&self, offset: &Position, size: &Size, reserved_lines: usize) -> bool {
+    pub fn below_view(&self, offset: &ScreenOffset, size: &Size, reserved_lines: usize) -> bool {
         if self.height >= offset.height + size.height.saturating_sub(reserved_lines) {
             return true;
         }
         false
     }
 
-    pub fn set_width(&mut self, val: usize) {
-        self.width = val;
-    }
-
-    pub fn set_height(&mut self, val: usize) {
-        self.height = val;
-    }
-
-    pub fn left(&mut self, delta: usize) {
-        self.width = self.width.saturating_sub(delta);
-    }
-
-    pub fn up(&mut self, delta: usize) {
-        self.height = self.height.saturating_sub(delta);
-    }
-
-    pub fn right(&mut self, delta: usize, max: usize) {
-        self.width = std::cmp::min(self.width.saturating_add(delta), max);
-    }
-
-    pub fn down(&mut self, delta: usize, max: usize) {
-        self.height = std::cmp::min(self.height.saturating_add(delta), max);
-    }
-
     pub fn resolve_width(&mut self, max: usize) {
         self.width = std::cmp::min(self.width, max);
     }
+}
 
-    pub fn page_up(&mut self) {
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ScreenOffset {
+    pub height: usize,
+    pub width: usize,
+}
+
+impl ScreenOffset {
+    pub fn to_position(&self) -> Position {
+        Position {
+            height: self.height,
+            width: self.width,
+        }
+    }
+
+    pub fn handle_offset_screen_snap(
+        &mut self,
+        pos: &Position,
+        size: &Size,
+        reserved: usize,
+        buffer_len: usize,
+    ) {
+        // updates the offset when offset adjustment is > 1
+        if pos.below_view(&*self, size, reserved) {
+            self.set_height(std::cmp::min(
+                buffer_len.saturating_sub(size.height).saturating_add(2), // leave space for the file info line
+                pos.height.saturating_sub(size.height).saturating_add(2),
+            ));
+            if reserved > 1 {
+                self.set_height(self.height.saturating_add(1));
+            }
+        } else if pos.above_view(&*self) {
+            self.set_height(pos.height.saturating_sub(1));
+        }
+
+        if pos.at_top() {
+            self.page_up();
+        }
+
+        if pos.at_left_edge() {
+            self.snap_left();
+        }
+
+        if pos.width >= size.width + self.width {
+            self.width = pos.width.saturating_sub(size.width).saturating_add(1);
+        } else if pos.width < self.width {
+            self.left(1);
+        }
+    }
+
+    pub fn update_offset_single_move(&mut self, pos: &Position, size: &Size, reserved: usize) {
+        //if cursor moves beyond height + offset -> increment height offset
+        if pos.below_view(&*self, size, reserved) {
+            self.set_height(std::cmp::min(
+                self.height.saturating_add(1),
+                pos.height.saturating_sub(size.height).saturating_add(2), // space for file info line
+            ));
+        }
+        // if height moves less than the offset -> decrement height
+        if pos.above_view(&*self) {
+            self.set_height(pos.height);
+        }
+        //if widith less than offset -> decerement width
+        if pos.left_of_view(&*self) {
+            self.set_width(pos.width);
+        }
+        //if width moves outside view by 1 increment
+        if pos.right_of_view(&*self, size) {
+            //self.screen_offset.width = self.screen_offset.width.saturating_sub(1);
+            self.width = self.width.saturating_add(1);
+        }
+    }
+}
+
+// inlining all methods here as they are straight forward computations
+impl Coordinate for ScreenOffset {
+    #[inline]
+    fn set_width(&mut self, val: usize) {
+        self.width = val;
+    }
+
+    #[inline]
+    fn set_height(&mut self, val: usize) {
+        self.height = val;
+    }
+
+    #[inline]
+    fn left(&mut self, delta: usize) {
+        self.width = self.width.saturating_sub(delta);
+    }
+
+    #[inline]
+    fn up(&mut self, delta: usize) {
+        self.height = self.height.saturating_sub(delta);
+    }
+
+    #[inline]
+    fn right(&mut self, delta: usize, max: usize) {
+        self.width = std::cmp::min(self.width.saturating_add(delta), max);
+    }
+
+    #[inline]
+    fn down(&mut self, delta: usize, max: usize) {
+        self.height = std::cmp::min(self.height.saturating_add(delta), max);
+    }
+
+    #[inline]
+    fn page_up(&mut self) {
         self.height = 0;
     }
 
-    pub fn page_down(&mut self, max: usize) {
+    #[inline]
+    fn page_down(&mut self, max: usize) {
         self.height = max;
     }
 
-    pub fn at_max_width(&mut self, max_width: usize) -> bool {
+    #[inline]
+    fn at_max_width(&self, max_width: usize) -> bool {
         self.width == max_width
     }
 
-    pub fn at_max_height(&mut self, max_height: usize) -> bool {
+    #[inline]
+    fn at_max_height(&self, max_height: usize) -> bool {
         self.height == max_height
     }
 
-    pub fn at_top(&mut self) -> bool {
+    #[inline]
+    fn at_top(&self) -> bool {
         self.height == 0
     }
 
-    pub fn at_left_edge(&mut self) -> bool {
+    #[inline]
+    fn at_left_edge(&self) -> bool {
         self.width == 0
     }
 
-    pub fn snap_right(&mut self, new_width: usize) {
+    #[inline]
+    fn snap_right(&mut self, new_width: usize) {
         self.width = new_width;
     }
 
-    pub fn snap_left(&mut self) {
+    #[inline]
+    fn snap_left(&mut self) {
         self.width = 0;
     }
 }
@@ -179,6 +380,24 @@ impl Position {
 pub struct Location {
     pub x: usize,
     pub y: usize,
+}
+
+pub enum Mode {
+    Insert,
+    VimMode,
+    Search,
+    Highlight,
+}
+
+impl Mode {
+    pub fn to_string(&self) -> &str {
+        match *self {
+            Self::Insert => "Insert",
+            Self::VimMode => "Vim",
+            Self::Search => "Search",
+            Self::Highlight => "Highlight",
+        }
+    }
 }
 
 pub struct Terminal;
@@ -286,6 +505,54 @@ impl Terminal {
         Self::queue_command(terminal::LeaveAlternateScreen)?;
         Ok(())
     }
+
+    #[inline]
+    pub fn render_status_line(
+        mode: Mode,
+        saved: bool,
+        size: &Size,
+        filename: Option<&str>,
+        line_pos: Option<(usize, usize)>,
+    ) -> Result<(), Error> {
+        let saved = if saved { "saved" } else { "modified" };
+        let filename = filename.unwrap_or("-");
+        let render_message = if let Some((line, len)) = line_pos {
+            format!(
+                "Mode: {} | Filename: {filename} | Status: {saved} | Line: {line} / {len}",
+                mode.to_string()
+            )
+        } else {
+            format!(
+                "Mode: {} | Filename: {filename} | Status: {saved} | Line: -",
+                mode.to_string()
+            )
+        };
+        Self::render_line(size.height.saturating_sub(1), render_message).unwrap();
+        Ok(())
+    }
+
+    #[inline]
+    pub fn get_welcome_message(size: &Size, screen_offset: &ScreenOffset) -> String {
+        let mut welcome_message = format!("{PROGRAM_NAME} editor -- version {PROGRAM_VERSION}");
+        let width = size.width;
+        let len = welcome_message.len();
+        #[allow(clippy::integer_division)]
+        let padding = (width.saturating_sub(len)) / 2;
+
+        let spaces = " ".repeat(padding.saturating_sub(1));
+        welcome_message = format!("~{spaces}{welcome_message}");
+        welcome_message.truncate(width);
+        let range = screen_offset.width
+            ..std::cmp::min(
+                screen_offset.width.saturating_add(size.width),
+                welcome_message.len(),
+            );
+        welcome_message = match welcome_message.get(range) {
+            Some(text) => text.to_string(),
+            None => String::new(),
+        };
+        welcome_message
+    }
 }
 
 #[cfg(test)]
@@ -299,7 +566,7 @@ mod test {
             height: 20,
             width: 20,
         };
-        let offset1 = Position {
+        let offset1 = ScreenOffset {
             height: 1,
             width: 1,
         };
@@ -318,7 +585,7 @@ mod test {
             height: 20,
             width: 20,
         };
-        let offset1 = Position {
+        let offset1 = ScreenOffset {
             height: 1,
             width: 1,
         };
@@ -337,7 +604,7 @@ mod test {
             height: 20,
             width: 20,
         };
-        let offset1 = Position {
+        let offset1 = ScreenOffset {
             height: 2,
             width: 2,
         };
@@ -356,7 +623,7 @@ mod test {
             height: 20,
             width: 20,
         };
-        let offset1 = Position {
+        let offset1 = ScreenOffset {
             height: 1,
             width: 0,
         };
@@ -375,7 +642,7 @@ mod test {
             height: 20,
             width: 20,
         };
-        let offset1 = Position {
+        let offset1 = ScreenOffset {
             height: 1,
             width: 2,
         };
@@ -394,7 +661,7 @@ mod test {
             height: 20,
             width: 20,
         };
-        let offset1 = Position {
+        let offset1 = ScreenOffset {
             height: 9,
             width: 8,
         };

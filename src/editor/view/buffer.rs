@@ -1,10 +1,10 @@
 use super::line::{GraphemeWidth, Line, TextFragment};
-use crate::editor::Position;
+use crate::editor::view::{Coordinate, Position};
 use std::fs::{read_to_string, OpenOptions};
 use std::io::prelude::*;
 use std::io::{Error, LineWriter};
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Buffer {
     pub text: Vec<Line>,
     pub filename: Option<String>,
@@ -20,17 +20,21 @@ impl Buffer {
         self.text.len()
     }
 
-    pub fn add_text_from_clipboard(&mut self, paste_text: String, pos: &mut Position) {
-        let mut buff_len = if !self.is_empty() { self.len() - 1 } else { 0 };
+    pub fn add_text_from_clipboard(&mut self, paste_text: &str, pos: &mut Position) {
+        let mut buff_len = if self.is_empty() {
+            self.len().saturating_sub(1)
+        } else {
+            0
+        };
         for (i, line_str) in paste_text.lines().enumerate() {
             if i != 0 {
-                pos.height += 1;
+                pos.height = pos.height.saturating_add(1);
                 pos.width = 0;
             }
 
             if pos.height > buff_len {
                 self.text.push(Line::from(line_str));
-                buff_len += 1;
+                buff_len = buff_len.saturating_add(1);
                 continue;
             }
             for c in line_str.chars() {
@@ -60,11 +64,8 @@ impl Buffer {
         for (i, line) in self.text.iter().enumerate() {
             if line.raw_string.contains(search_str) {
                 let resulting_widths = self.find_search_widths(search_str, i);
-                for width in resulting_widths.iter() {
-                    positions.push(Position {
-                        width: *width,
-                        height: i as usize,
-                    })
+                for width in resulting_widths {
+                    positions.push(Position { width, height: i });
                 }
             }
         }
@@ -86,7 +87,7 @@ impl Buffer {
             return;
         }
         while position.height > 0 {
-            position.height -= 1;
+            position.height = position.height.saturating_sub(1);
             if let Some(new_width) = self.text[position.height].get_prev_word_spillover() {
                 position.width = new_width;
                 return;
@@ -114,7 +115,7 @@ impl Buffer {
         // here look for the next char following a space
         // go to next line until we reach EOF
         while position.height < self.text.len().saturating_sub(1) {
-            position.height += 1;
+            position.height = position.height.saturating_add(1);
 
             if let Some(new_width) = self.text[position.height].next_word_spillover() {
                 position.width = new_width;
@@ -134,13 +135,13 @@ impl Buffer {
         let search_len = search_str.len();
         let first = string_split.next().expect("No split results");
         let mut running_len = first.len();
-        let mut widths: Vec<usize> = vec![running_len.clone()];
+        let mut widths: Vec<usize> = vec![running_len];
         for slice in string_split {
             let current_len = slice.len();
             running_len = running_len
                 .saturating_add(search_len)
                 .saturating_add(current_len);
-            widths.push(running_len.clone());
+            widths.push(running_len);
         }
         widths.pop();
         widths
@@ -152,9 +153,8 @@ impl Buffer {
 
     pub fn save(&mut self) {
         //write buffer to disk
-        let filename = match &self.filename {
-            Some(name) => name,
-            None => panic!("Trying to save without filename being set"),
+        let Some(filename) = &self.filename else {
+            panic!("Trying to save without filename being set")
         };
         let file = OpenOptions::new()
             .write(true)
@@ -162,7 +162,7 @@ impl Buffer {
             .open(filename)
             .expect("Error opening file");
         let mut file = LineWriter::new(file);
-        for line in self.text.iter() {
+        for line in &self.text {
             let text_line = line.to_string();
             file.write_all(text_line.as_bytes())
                 .expect("Error on write");
@@ -206,21 +206,21 @@ impl Buffer {
             GraphemeWidth::Half => 1,
             GraphemeWidth::Full => 2,
         };
-        if !self.is_empty() {
+        if self.is_empty() {
+            self.text.push(Line::from(insert_char.to_string().as_str()));
+        } else {
             self.text
                 .get_mut(pos.height)
                 .expect("Error getting mut line")
                 .string
                 .insert(pos.width, new_fragment);
-        } else {
-            self.text.push(Line::from(insert_char.to_string().as_str()));
         }
         self.text
             .get_mut(pos.height)
             .expect("Out of bounds error")
             .generate_raw_string();
         self.is_saved = false;
-        pos.width += move_width;
+        pos.width = pos.width.saturating_add(move_width);
     }
 
     pub fn update_line_delete(&mut self, pos: &mut Position) {
@@ -268,7 +268,7 @@ impl Buffer {
         match fragments_to_check {
             Some(frags) => {
                 for fragment in frags.iter().rev() {
-                    if fragment.grapheme != " ".to_string() {
+                    if fragment.grapheme != *" ".to_string() {
                         return false;
                     }
                 }
@@ -276,7 +276,7 @@ impl Buffer {
             None => return false,
         }
 
-        return true;
+        true
     }
 
     pub fn new_line(&mut self, line_index: usize) {
@@ -364,7 +364,7 @@ impl Buffer {
 
     pub fn delete_segment(&mut self, left_pos: &Position, right_pos: &mut Position) {
         //delete from right to left
-        right_pos.width += 1;
+        right_pos.width = right_pos.width.saturating_add(1);
         while right_pos.width > left_pos.width {
             self.update_line_delete(right_pos);
         }

@@ -1,4 +1,6 @@
 use super::terminal::Size;
+use super::terminal::{Coordinate, Position};
+use super::view::buffer::Buffer;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use std::convert::TryFrom;
 
@@ -12,6 +14,73 @@ pub enum Direction {
     PageDown,
     End,
     Home,
+}
+
+impl Direction {
+    // allows single source of cursor movement across modes
+    pub fn move_cursor(&self, cursor_position: &mut Position, buffer: &Buffer) {
+        match *self {
+            //if not on last line, move down
+            //if the next line is shorter, snap to the end of that line
+            Direction::Down => {
+                cursor_position.down(1, buffer.len().saturating_sub(1));
+                cursor_position.resolve_width(buffer.text[cursor_position.height].grapheme_len());
+            }
+            //if we are not in row 0, move up
+            //if the line above is shorter than the previous line, snap to the end
+            Direction::Up => {
+                cursor_position.up(1);
+                cursor_position.resolve_width(buffer.text[cursor_position.height].grapheme_len());
+            }
+            //move left
+            //if we are at 0,0 no action
+            //if we are at width 0, snap to the right end of the previous line
+            //else move left 1
+            Direction::Left => match (cursor_position.at_left_edge(), cursor_position.at_top()) {
+                (true, false) => {
+                    cursor_position.up(1);
+                    cursor_position.snap_right(buffer.text[cursor_position.height].grapheme_len());
+                }
+                _ => {
+                    cursor_position.left(1);
+                }
+            },
+            //if we are on the last line at the -1 position of the text, do nothing
+            //if we are at the end of the line, snap to position 0 on the next line
+            //else move right 1 char
+            Direction::Right => {
+                let grapheme_len = buffer.text[cursor_position.height].grapheme_len();
+                let text_height = buffer.len().saturating_sub(1);
+
+                match (
+                    cursor_position.at_max_width(grapheme_len),
+                    cursor_position.at_max_height(text_height),
+                ) {
+                    (true, false) => {
+                        cursor_position.down(1, text_height);
+                        cursor_position.snap_left();
+                    }
+                    _ => cursor_position.right(1, grapheme_len),
+                };
+            }
+            //move to last line, cursor width will stay the same
+            Direction::PageDown => {
+                cursor_position.page_down(buffer.len().saturating_sub(1));
+            }
+            //move to the first line, cursor width stays the same
+            Direction::PageUp => {
+                cursor_position.page_up();
+            }
+            //move to end of current line
+            Direction::End => {
+                cursor_position.snap_right(buffer.text[cursor_position.height].grapheme_len());
+            }
+            //move to start of current line
+            Direction::Home => {
+                cursor_position.snap_left();
+            }
+        }
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -107,6 +176,7 @@ impl TryFrom<Event> for SearchCommand {
                 (KeyCode::Backspace, _) => Ok(Self::BackSpace),
                 _ => Ok(Self::NoAction),
             },
+            #[allow(clippy::as_conversions)]
             Event::Resize(width_u16, height_u16) => Ok(Self::Resize(Size {
                 height: height_u16 as usize,
                 width: width_u16 as usize,
@@ -142,6 +212,7 @@ impl TryFrom<Event> for HighlightCommand {
                 (KeyCode::Backspace, _) => Ok(Self::Delete),
                 _ => Ok(Self::NoAction),
             },
+            #[allow(clippy::as_conversions)]
             Event::Resize(width_u16, height_u16) => Ok(Self::Resize(Size {
                 height: height_u16 as usize,
                 width: width_u16 as usize,
@@ -155,6 +226,7 @@ pub enum FileNameCommand {
     Insert(char),
     BackSpace,
     SaveFileName,
+    Quit,
     NoAction,
 }
 
@@ -166,6 +238,7 @@ impl TryFrom<Event> for FileNameCommand {
                 KeyCode::Char(c) => Ok(Self::Insert(c)),
                 KeyCode::Backspace => Ok(Self::BackSpace),
                 KeyCode::Enter => Ok(Self::SaveFileName),
+                KeyCode::Esc => Ok(Self::Quit),
                 _ => Ok(Self::NoAction),
             },
             _ => Ok(Self::NoAction),
@@ -176,6 +249,7 @@ impl TryFrom<Event> for FileNameCommand {
 pub enum VimModeCommands {
     Move(Direction),
     NoAction,
+    Resize(Size),
     Exit,
 }
 
@@ -195,6 +269,11 @@ impl TryFrom<Event> for VimModeCommands {
                 (KeyCode::Esc, _) => Ok(Self::Exit),
                 _ => Ok(Self::NoAction),
             },
+            #[allow(clippy::as_conversions)]
+            Event::Resize(width_u16, height_u16) => Ok(Self::Resize(Size {
+                height: height_u16 as usize,
+                width: width_u16 as usize,
+            })),
             _ => Ok(Self::NoAction),
         }
     }
@@ -225,6 +304,32 @@ impl TryFrom<Event> for JumpCommand {
                 KeyCode::Enter => Ok(Self::Move),
                 _ => Ok(Self::NoAction),
             },
+            _ => Ok(Self::NoAction),
+        }
+    }
+}
+
+pub enum HelpCommand {
+    Exit,
+    NoAction,
+    Resize(Size),
+}
+
+impl TryFrom<Event> for HelpCommand {
+    type Error = String;
+    fn try_from(event: Event) -> Result<Self, Self::Error> {
+        match event {
+            Event::Key(KeyEvent {
+                code, modifiers, ..
+            }) => match (code, modifiers) {
+                (KeyCode::Char('h'), KeyModifiers::CONTROL) | (KeyCode::Esc, _) => Ok(Self::Exit),
+                _ => Ok(Self::NoAction),
+            },
+            #[allow(clippy::as_conversions)]
+            Event::Resize(width_u16, height_u16) => Ok(Self::Resize(Size {
+                height: height_u16 as usize,
+                width: width_u16 as usize,
+            })),
             _ => Ok(Self::NoAction),
         }
     }

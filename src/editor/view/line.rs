@@ -43,7 +43,7 @@ impl TryFrom<&str> for TextFragment {
                     _ => {
                         let control = trimmed
                             .chars()
-                            .map(|char| char.is_control())
+                            .map(char::is_control)
                             .reduce(|a, b| a | b)
                             .expect("Error in reduction");
                         let replace_val = if control {
@@ -68,7 +68,7 @@ impl TryFrom<&str> for TextFragment {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Line {
     pub string: Vec<TextFragment>,
     pub raw_string: String,
@@ -89,6 +89,7 @@ impl fmt::Display for Line {
     }
 }
 
+/*
 impl Default for Line {
     fn default() -> Line {
         Line {
@@ -97,6 +98,7 @@ impl Default for Line {
         }
     }
 }
+*/
 
 impl Line {
     pub fn generate_raw_string(&mut self) {
@@ -108,11 +110,11 @@ impl Line {
     }
 
     pub fn grapheme_len(&self) -> usize {
-        if self.string.len() == 0 {
+        if self.string.is_empty() {
             return 0;
         }
 
-        let len = self
+        let len: usize = self
             .string
             .iter()
             .map(|fragment| match fragment.render_width {
@@ -129,31 +131,25 @@ impl Line {
         if self.is_empty() {
             return None;
         }
-        let mut space_pos = start.clone();
+        let mut space_pos = start;
 
-        for (i, c) in self
-            .raw_string
-            .as_bytes()
-            .into_iter()
-            .skip(start)
-            .enumerate()
-        {
-            space_pos = i + start;
+        for (i, c) in self.raw_string.as_bytes().iter().skip(start).enumerate() {
+            space_pos = i.saturating_add(start);
             if *c == 32 {
                 break;
             }
         }
-        space_pos += 1;
+        space_pos = space_pos.saturating_add(1);
 
         for (i, c) in self
             .raw_string
             .as_bytes()
-            .into_iter()
+            .iter()
             .skip(space_pos)
             .enumerate()
         {
             if *c != 32 {
-                return Some(i + space_pos);
+                return Some(i.saturating_add(space_pos));
             }
         }
 
@@ -169,13 +165,13 @@ impl Line {
             return Some(0);
         }
 
-        for (i, c) in chars.into_iter().skip(1).enumerate() {
+        for (i, c) in chars.iter().skip(1).enumerate() {
             if *c != 32 {
-                return Some(i + 1);
+                return Some(i.saturating_add(1));
             }
         }
 
-        return None;
+        None
     }
 
     pub fn get_prev_word(&self, start: usize) -> Option<usize> {
@@ -183,9 +179,9 @@ impl Line {
             return None;
         }
 
-        let mut pos = start.clone();
-        for c in self.raw_string.as_bytes()[..start].into_iter().rev() {
-            pos -= 1;
+        let mut pos = start;
+        for c in self.raw_string.as_bytes()[..start].iter().rev() {
+            pos = pos.saturating_sub(1);
             if *c == 32 {
                 break;
             }
@@ -195,11 +191,11 @@ impl Line {
             return None;
         }
 
-        pos -= 1;
-        for c in self.raw_string.as_bytes()[..pos].into_iter().rev() {
-            pos -= 1;
+        pos = pos.saturating_sub(1);
+        for c in self.raw_string.as_bytes()[..pos].iter().rev() {
+            pos = pos.saturating_sub(1);
             if *c != 32 {
-                return Some(pos + 1);
+                return Some(pos.saturating_add(1));
             }
         }
 
@@ -213,15 +209,15 @@ impl Line {
         let len = self.raw_string.len().saturating_sub(1);
         let bytes = self.raw_string.as_bytes();
         if bytes[len] != 32 {
-            return Some(len.into());
+            return Some(len);
         }
-        for (i, c) in bytes.into_iter().rev().enumerate().skip(1) {
+        for (i, c) in bytes.iter().rev().enumerate().skip(1) {
             if *c != 32 {
-                return Some(i - 1);
+                return Some(i.saturating_sub(1));
             }
         }
 
-        return None;
+        None
     }
 
     pub fn from(line_str: &str) -> Self {
@@ -241,7 +237,7 @@ impl Line {
                             _ => {
                                 let control = trimmed
                                     .chars()
-                                    .map(|char| char.is_control())
+                                    .map(char::is_control)
                                     .reduce(|a, b| a | b)
                                     .expect("Error in reduction");
                                 let replace_val = if control {
@@ -281,17 +277,13 @@ impl Line {
             .get(range.start..end)
             .expect("Out of bounds error");
 
-        return Line {
+        Line {
             string: new_line.to_vec(),
             raw_string: String::new(),
-        };
+        }
     }
 
     pub fn is_empty(&self) -> bool {
-        if self.string.len() == 0 {
-            return true;
-        } else {
-            return false;
-        }
+        self.string.len() == 0
     }
 }

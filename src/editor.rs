@@ -5,10 +5,10 @@ use std::env::args;
 use std::io::Error;
 use std::panic::{set_hook, take_hook};
 use std::{thread, time::Duration};
-use terminal::{Position, Terminal};
+use terminal::Terminal;
 mod view;
 use view::View;
-mod editorcommands;
+pub mod editorcommands;
 use editorcommands::EditorCommand;
 
 #[derive(Default)]
@@ -68,24 +68,19 @@ impl Editor {
             match EditorCommand::try_from(event) {
                 Ok(command) => {
                     if matches!(command, EditorCommand::Quit) {
-                        if !self.view.buffer.is_saved {
-                            if !self.view.buffer.is_empty() {
-                                let exit = self.exit_without_saving();
-                                match exit {
-                                    false => {
-                                        if self.view.buffer.filename.is_none() {
-                                            self.view.get_file_name();
-                                        }
-                                        if self.view.buffer.filename.is_some() {
-                                            self.view.buffer.save();
-                                        }
-                                    }
-                                    true => {
-                                        Terminal::clear_screen().unwrap();
-                                        self.view.render_line(0, "Exiting without saving...");
-                                        Terminal::execute().unwrap();
-                                        thread::sleep(Duration::from_millis(300));
-                                    }
+                        if !self.view.buffer.is_saved && !self.view.buffer.is_empty() {
+                            let exit = Self::exit_without_saving();
+                            if exit {
+                                Terminal::clear_screen().unwrap();
+                                Terminal::render_line(0, "Exiting without saving...").unwrap();
+                                Terminal::execute().unwrap();
+                                thread::sleep(Duration::from_millis(300));
+                            } else {
+                                if self.view.buffer.filename.is_none() {
+                                    self.view.get_file_name();
+                                }
+                                if self.view.buffer.filename.is_some() {
+                                    self.view.buffer.save();
                                 }
                             }
                         }
@@ -109,32 +104,34 @@ impl Editor {
         }
     }
 
-    fn exit_without_saving(&self) -> bool {
+    fn exit_without_saving() -> bool {
         Terminal::clear_screen().unwrap();
         Terminal::hide_cursor().unwrap();
-        self.view.render_line(0, "Leave without saving:");
-        self.view.render_line(1, "Ctrl-y = exit | Ctrl-n = save");
+        Terminal::render_line(0, "Leave without saving:").unwrap();
+        Terminal::render_line(1, "Ctrl-y = exit | Ctrl-n = save").unwrap();
         Terminal::execute().unwrap();
         loop {
             match read() {
-                Ok(event) => match event {
-                    Event::Key(KeyEvent {
+                Ok(event) => {
+                    if let Event::Key(KeyEvent {
                         code, modifiers, ..
-                    }) => match (code, modifiers) {
-                        (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
-                            return true;
+                    }) = event
+                    {
+                        match (code, modifiers) {
+                            (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
+                                return true;
+                            }
+                            (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
+                                return false;
+                            }
+                            _ => {
+                                // not reading other key presses
+                            }
                         }
-                        (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
-                            return false;
-                        }
-                        _ => {
-                            // not reading other key presses
-                        }
-                    },
-                    _ => {
+                    } else {
                         // doing nothing for other events
                     }
-                },
+                }
                 Err(err) => {
                     #[cfg(debug_assertions)]
                     {
@@ -147,7 +144,7 @@ impl Editor {
 
     fn refresh_screen(&mut self) -> Result<(), Error> {
         Terminal::hide_cursor()?;
-        Terminal::move_cursor_to(self.view.screen_offset)?;
+        Terminal::move_cursor_to(self.view.screen_offset.to_position())?;
         Terminal::clear_screen()?;
         if self.should_quit {
             Terminal::print("Goodbye.\r\n")?;

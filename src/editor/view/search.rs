@@ -1,54 +1,264 @@
+use crate::editor::editorcommands::SearchCommand;
 use crate::editor::{
-    terminal::{Position, Size, Terminal},
+    terminal::{Mode, Position, ScreenOffset, Size, Terminal},
     view::Buffer,
 };
+use crossterm::event::read;
 use crossterm::style::{Attribute, Color, Print, PrintStyledContent, StyledContent, Stylize};
 use std::cmp::min;
 use std::collections::HashSet;
 
 pub struct Search {
-    pub render_search: bool,
-    pub search_index: usize,
-    pub string: String,
-    pub previous_position: Position,
-    pub previous_offset: Position,
-    pub stack: Vec<Vec<Position>>,
-    pub line_indicies: HashSet<usize>,
+    index: usize, // index of search positions we are currently on
+    cursor_position: Position,
+    screen_offset: ScreenOffset,
+    highlight: Color,
+    text: Color,
+    stack: Vec<Vec<Position>>,
+    string: String,
+    line_indicies: HashSet<usize>,
 }
 
 impl Default for Search {
     fn default() -> Self {
         Self {
-            render_search: false,
-            search_index: 0,
+            index: 0,
             string: String::new(),
-            previous_position: Position::default(),
-            previous_offset: Position::default(),
+            cursor_position: Position::default(),
+            screen_offset: ScreenOffset::default(),
+            highlight: Color::DarkBlue,
+            text: Color::White,
             stack: Vec::new(),
             line_indicies: HashSet::new(),
         }
     }
 }
 
-enum SearchResolver {
+enum IndexResolver {
     Left,
     Mid,
     Right,
 }
 
 impl Search {
-    pub fn set_previous(&mut self, position: &Position, offset: &Position) {
-        self.previous_position = *position;
-        self.previous_offset = *offset;
+    pub fn new(pos: Position, offset: ScreenOffset, highlight: Color, text: Color) -> Self {
+        Self {
+            index: 0,
+            string: String::new(),
+            cursor_position: pos,
+            screen_offset: offset,
+            highlight,
+            text,
+            stack: Vec::new(),
+            line_indicies: HashSet::new(),
+        }
     }
-    pub fn find_relative_start(&self, curr_height: &usize) -> Option<usize> {
+
+    // entry
+    // no changes to buffer -> immutable reference
+    pub fn run(
+        &mut self,
+        prev_pos: &mut Position,
+        prev_offset: &mut ScreenOffset,
+        size: &mut Size,
+        buffer: &Buffer,
+    ) {
+        loop {
+            // on errors or events that dont matter in this context
+            // skip and continue
+            self.render(buffer, size);
+            let Ok(read_event) = read() else { continue }; //skipping errors here
+
+            match SearchCommand::try_from(read_event) {
+                Ok(event) => match event {
+                    SearchCommand::Insert(c) => {
+                        // add char to search query
+                        self.string.push(c);
+                        self.stack.push(buffer.search(&self.string));
+                        self.index = self.find_relative_start(prev_pos.height).unwrap_or(0);
+                        self.set_line_indicies();
+                    }
+                    SearchCommand::Next => {
+                        //snap to next result
+                        if !self.stack.is_empty() {
+                            let curr_results = self.stack.last().unwrap();
+                            self.index = if curr_results.len().saturating_sub(1) > self.index {
+                                self.index.saturating_add(1)
+                            } else {
+                                0
+                            };
+                        }
+                    }
+                    SearchCommand::Previous => {
+                        //snap to previous result
+                        if !self.stack.is_empty() {
+                            //let curr_results = self.stack.get(self.stack.len() - 1).unwrap();
+                            let curr_results = self.stack.last().unwrap();
+                            self.index = if self.index > 0 {
+                                self.index.saturating_sub(1)
+                            } else {
+                                curr_results.len().saturating_sub(1)
+                            };
+                        }
+                    }
+                    SearchCommand::RevertState => {
+                        //return to pre search screen state
+                        self.revert_screen_state(prev_pos, prev_offset);
+                        break;
+                    }
+                    SearchCommand::AssumeState => {
+                        //assume current state on screen after search
+                        *prev_pos = self.cursor_position;
+                        *prev_offset = self.screen_offset;
+                        break;
+                    }
+                    SearchCommand::BackSpace => {
+                        // remove char from search query
+                        if !self.string.is_empty() {
+                            self.string.pop();
+                            self.stack.pop();
+                            self.index = self.find_relative_start(prev_pos.height).unwrap_or(0);
+                            self.set_line_indicies();
+                        }
+                    }
+                    SearchCommand::Resize(new_size) => *size = new_size,
+                    SearchCommand::NoAction => continue,
+                },
+                Err(_) => continue,
+            }
+
+            // no search query
+            if self.stack.is_empty() {
+                self.revert_screen_state(prev_pos, prev_offset);
+                continue;
+            }
+
+            // no matches on current search query
+            if self.stack[self.stack.len().saturating_sub(1)].is_empty() {
+                self.revert_screen_state(prev_pos, prev_offset);
+                continue;
+            }
+
+            //grab the latest search results from the stack
+            //get the search index position
+            //self.cursor_position = self.stack[self.stack.len() - 1][self.index].clone();
+            self.cursor_position = self.stack.last().unwrap()[self.index];
+
+            // if the search position is out of current screen bounds
+            if !self
+                .cursor_position
+                .height_in_view(&self.screen_offset, size, 2)
+                | !self
+                    .cursor_position
+                    .width_in_view(&self.screen_offset, size)
+            {
+                self.screen_offset.handle_offset_screen_snap(
+                    &self.cursor_position,
+                    size,
+                    2,
+                    buffer.len(),
+                );
+            }
+        }
+        self.render(buffer, size);
+    }
+
+    fn render(&self, buffer: &Buffer, size: &Size) {
+        // this largely is the same logic as Editor::refresh_screen
+        // maybe that logic should be called out of view to not reproduce code
+        if (size.width == 0) | (size.height == 0) {
+            return;
+        }
+        Terminal::hide_cursor().unwrap();
+        Terminal::move_cursor_to(self.screen_offset.to_position()).unwrap();
+        Terminal::clear_screen().unwrap();
+
+        #[allow(clippy::integer_division)]
+        for current_row in self.screen_offset.height
+            ..self
+                .screen_offset
+                .height
+                .saturating_add(size.height)
+                .saturating_sub(2)
+        {
+            let relative_row = current_row.saturating_sub(self.screen_offset.height);
+            if self.line_indicies.contains(&current_row) {
+                self.render_search_line(
+                    current_row,
+                    buffer,
+                    &self.screen_offset,
+                    size,
+                    self.highlight,
+                    self.text,
+                );
+                continue;
+            }
+
+            // buffer should not be empty here
+            if let Some(line) = buffer.text.get(current_row) {
+                Terminal::render_line(
+                    relative_row,
+                    line.get_line_subset(
+                        self.screen_offset.width
+                            ..self.screen_offset.width.saturating_add(size.width),
+                    ),
+                )
+                .unwrap();
+            } else {
+                Terminal::render_line(relative_row, "~").unwrap();
+            }
+        }
+
+        self.render_search_string(size);
+        Terminal::render_status_line(
+            Mode::Search,
+            buffer.is_saved,
+            size,
+            buffer.filename.as_deref(),
+            Some((self.cursor_position.height.saturating_add(1), buffer.len())),
+        )
+        .unwrap();
+
+        Terminal::move_cursor_to(self.cursor_position.view_height(&self.screen_offset)).unwrap();
+        Terminal::show_cursor().unwrap();
+        Terminal::execute().unwrap();
+    }
+
+    /*
+    fn render_file_info(&self, buffer: &Buffer, height: usize) {
+        let saved = if buffer.is_saved { "saved" } else { "modified" };
+        let filename = match &buffer.filename {
+            Some(file) => file,
+            None => "-",
+        };
+        let render_message = if !buffer.is_empty() {
+            format!("Mode: Search | Filename: {filename} | Status: {saved} | Line: -",)
+        } else {
+            format!(
+                "Mode: Search | Filename: {filename} | Status: {saved} | Line: {} / {}",
+                self.cursor_position.height.saturating_add(1),
+                buffer.len()
+            )
+        };
+
+        Terminal::render_line(height.saturating_sub(1), render_message).unwrap();
+    }
+    */
+
+    #[inline]
+    fn revert_screen_state(&mut self, pos: &Position, offset: &ScreenOffset) {
+        self.cursor_position = *pos;
+        self.screen_offset = *offset;
+    }
+
+    fn find_relative_start(&self, curr_height: usize) -> Option<usize> {
         // binary search to find the closest search result to pre search cursor position
         // returns Some when there is a search result
         // returns None otherwise
         // None is a catch all, we should always have a closest position
         let current_positions: Vec<Position> =
             match self.stack.get(self.stack.len().saturating_sub(1)) {
-                Some(positions) => positions.to_vec(),
+                Some(positions) => positions.clone(),
                 None => return None,
             };
         let mut l: usize = 0;
@@ -57,64 +267,69 @@ impl Search {
             return None;
         }
 
+        #[allow(clippy::integer_division)]
         let mut m = (r - l) / 2 + l;
         while l < r {
-            if (current_positions[m].height == *curr_height)
-                | ((current_positions[m.saturating_sub(1)].height < *curr_height)
-                    & (current_positions[min(m + 1, current_positions.len().saturating_sub(1))]
-                        .height
-                        > *curr_height))
+            if (current_positions[m].height == curr_height)
+                | ((current_positions[m.saturating_sub(1)].height < curr_height)
+                    & (current_positions[min(
+                        m.saturating_add(1),
+                        current_positions.len().saturating_sub(1),
+                    )]
+                    .height
+                        > curr_height))
             {
                 match Self::resolve_closest(
-                    *curr_height,
+                    curr_height,
                     current_positions[m.saturating_sub(1)].height,
                     current_positions[m].height,
-                    current_positions[min(m + 1, current_positions.len().saturating_sub(1))].height,
+                    current_positions[min(
+                        m.saturating_add(1),
+                        current_positions.len().saturating_sub(1),
+                    )]
+                    .height,
                 ) {
-                    SearchResolver::Left => return Some(m - 1),
-                    SearchResolver::Mid => return Some(m),
-                    SearchResolver::Right => return Some(m + 1),
+                    IndexResolver::Left => return Some(m.saturating_sub(1)),
+                    IndexResolver::Mid => return Some(m),
+                    IndexResolver::Right => return Some(m.saturating_add(1)),
                 }
-            } else if current_positions[m].height > *curr_height {
+            } else if current_positions[m].height > curr_height {
                 r = m.saturating_sub(1);
             } else {
-                l = m + 1;
+                l = m.saturating_add(1);
             }
             m = (r - l) / 2 + l;
         }
-        return None;
+        None
     }
 
-    fn resolve_closest(curr: usize, left: usize, mid: usize, right: usize) -> SearchResolver {
+    fn resolve_closest(curr: usize, left: usize, mid: usize, right: usize) -> IndexResolver {
         // resolves the closests search position to cursor
         // within the range on values returned in binary search
         if curr > mid {
-            let res = if right - curr < curr - mid {
-                SearchResolver::Right
+            if right.saturating_sub(curr) < curr.saturating_sub(mid) {
+                IndexResolver::Right
             } else {
-                SearchResolver::Mid
-            };
-            return res;
+                IndexResolver::Mid
+            }
+        } else if curr.saturating_sub(left) < mid.saturating_sub(curr) {
+            IndexResolver::Left
         } else {
-            let res = if curr - left < mid - curr {
-                SearchResolver::Left
-            } else {
-                SearchResolver::Mid
-            };
-            return res;
+            IndexResolver::Mid
         }
     }
 
-    pub fn render_search_string(&self, size: &Size) {
+    #[inline]
+    fn render_search_string(&self, size: &Size) {
         let result = Terminal::render_line(
             size.height.saturating_sub(2),
-            &format!("Search: {}", self.string),
+            format!("Search: {}", self.string),
         );
 
-        debug_assert!(result.is_ok(), "Failed to render line")
+        debug_assert!(result.is_ok(), "Failed to render line");
     }
 
-    pub fn set_line_indicies(&mut self) {
+    fn set_line_indicies(&mut self) {
         if self.stack.is_empty() {
             return;
         }
@@ -122,24 +337,16 @@ impl Search {
         self.line_indicies.clear();
 
         // iter through search hits for current query
-        for position in self.stack[self.stack.len().saturating_sub(1)].iter() {
+        for position in &self.stack[self.stack.len().saturating_sub(1)] {
             self.line_indicies.insert(position.height);
         }
     }
 
-    pub fn clean_up_search(&mut self) {
-        self.render_search = false;
-        self.string.clear();
-        self.stack.clear();
-        self.line_indicies.clear();
-        self.search_index = 0;
-    }
-
-    pub fn render_search_line(
-        &mut self,
+    fn render_search_line(
+        &self,
         line: usize,
         buffer: &Buffer,
-        offset: &Position,
+        offset: &ScreenOffset,
         size: &Size,
         search_highlight: Color,
         search_text: Color,
@@ -196,13 +403,13 @@ mod tests {
             })
         }
         search.stack = vec![positions];
-        let mut pos = search.find_relative_start(&10);
+        let mut pos = search.find_relative_start(10);
         assert_eq!(pos.unwrap(), 1);
-        pos = search.find_relative_start(&15);
+        pos = search.find_relative_start(15);
         assert_eq!(pos.unwrap(), 2);
-        pos = search.find_relative_start(&25);
+        pos = search.find_relative_start(25);
         assert_eq!(pos.unwrap(), 3);
-        pos = search.find_relative_start(&40);
+        pos = search.find_relative_start(40);
         assert_eq!(pos.unwrap(), 4);
     }
 }
