@@ -86,7 +86,12 @@ impl Editor {
                         }
                         self.should_quit = true;
                     } else {
-                        self.view.handle_event(command);
+                        // process the event
+                        // handle is any downtream commands quit the session
+                        let should_continue: bool = self.view.handle_event(command);
+                        if !should_continue {
+                            self.should_quit = true;
+                        }
                     }
                 }
                 Err(err) => {

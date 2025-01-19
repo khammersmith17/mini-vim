@@ -246,10 +246,19 @@ impl TryFrom<Event> for FileNameCommand {
     }
 }
 
+#[derive(Debug)]
+pub enum QueueInitCommand {
+    PageUp,
+    PageDown,
+    Colon,
+}
+
 pub enum VimModeCommands {
     Move(Direction),
+    Paste,
     NoAction,
     Resize(Size),
+    ComplexCommand(QueueInitCommand),
     Exit,
 }
 
@@ -257,16 +266,18 @@ impl TryFrom<Event> for VimModeCommands {
     type Error = String;
     fn try_from(event: Event) -> Result<Self, Self::Error> {
         match event {
-            Event::Key(KeyEvent {
-                code, modifiers, ..
-            }) => match (code, modifiers) {
-                (KeyCode::Char('4'), KeyModifiers::SHIFT) => Ok(Self::Move(Direction::End)), //represents $
-                (KeyCode::Char('h'), _) => Ok(Self::Move(Direction::Left)),
-                (KeyCode::Char('k'), _) => Ok(Self::Move(Direction::Up)),
-                (KeyCode::Char('j'), _) => Ok(Self::Move(Direction::Down)),
-                (KeyCode::Char('l'), _) => Ok(Self::Move(Direction::Right)),
-                (KeyCode::Char('0'), _) => Ok(Self::Move(Direction::Home)),
-                (KeyCode::Esc, _) => Ok(Self::Exit),
+            Event::Key(KeyEvent { code, .. }) => match code {
+                KeyCode::Char('$') => Ok(Self::Move(Direction::End)), //represents $
+                KeyCode::Char('p') => Ok(Self::Paste),
+                KeyCode::Char('h') => Ok(Self::Move(Direction::Left)),
+                KeyCode::Char('k') => Ok(Self::Move(Direction::Up)),
+                KeyCode::Char('j') => Ok(Self::Move(Direction::Down)),
+                KeyCode::Char('l') => Ok(Self::Move(Direction::Right)),
+                KeyCode::Char('0') => Ok(Self::Move(Direction::Home)),
+                KeyCode::Char('g') => Ok(Self::ComplexCommand(QueueInitCommand::PageUp)),
+                KeyCode::Char('G') => Ok(Self::ComplexCommand(QueueInitCommand::PageDown)),
+                KeyCode::Char(':') => Ok(Self::ComplexCommand(QueueInitCommand::Colon)),
+                KeyCode::Esc => Ok(Self::Exit),
                 _ => Ok(Self::NoAction),
             },
             #[allow(clippy::as_conversions)]
@@ -275,6 +286,52 @@ impl TryFrom<Event> for VimModeCommands {
                 width: width_u16 as usize,
             })),
             _ => Ok(Self::NoAction),
+        }
+    }
+}
+
+pub enum VimColonQueue {
+    New(char),
+    Other,
+    Execute,
+    Backspace,
+    Resize(Size),
+}
+
+impl TryFrom<Event> for VimColonQueue {
+    type Error = String;
+    fn try_from(event: Event) -> Result<Self, Self::Error> {
+        match event {
+            Event::Key(KeyEvent { code, .. }) => match code {
+                KeyCode::Backspace => Ok(Self::Backspace),
+                KeyCode::Enter => Ok(Self::Execute),
+                KeyCode::Char(c) => Ok(Self::New(c)),
+                _ => Ok(Self::Other),
+            },
+            #[allow(clippy::as_conversions)]
+            Event::Resize(width_u16, height_u16) => Ok(Self::Resize(Size {
+                height: height_u16 as usize,
+                width: width_u16 as usize,
+            })),
+            _ => Ok(Self::Other),
+        }
+    }
+}
+
+pub enum ColonQueueActions {
+    Write,
+    Quit,
+    Override,
+}
+
+impl TryFrom<char> for ColonQueueActions {
+    type Error = String;
+    fn try_from(val: char) -> Result<Self, Self::Error> {
+        match val {
+            'w' => Ok(Self::Write),
+            'q' => Ok(Self::Quit),
+            '!' => Ok(Self::Override),
+            _ => Err("invalid command".into()),
         }
     }
 }

@@ -1,9 +1,9 @@
 use super::editorcommands::{
-    Direction, EditorCommand, FileNameCommand, HighlightCommand, JumpCommand, VimModeCommands,
+    Direction, EditorCommand, FileNameCommand, HighlightCommand, JumpCommand,
 };
 use super::terminal::{Coordinate, Mode, Position, ScreenOffset, Size, Terminal};
-use clipboard::{ClipboardContext, ClipboardProvider};
 use crossterm::event::read;
+use std::error::Error;
 pub mod buffer;
 use buffer::Buffer;
 use std::cmp::min;
@@ -18,9 +18,16 @@ mod highlight;
 use highlight::{Highlight, HighlightOrientation};
 mod vim_mode;
 use vim_mode::VimMode;
+mod clipboard_interface;
+use clipboard_interface::ClipboardUtils;
 
 pub const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
 pub const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+const ORIGIN_POSITION: Position = Position {
+    height: 0_usize,
+    width: 0_usize,
+};
 
 /// the core logic
 pub struct View {
@@ -28,7 +35,6 @@ pub struct View {
     pub cursor_position: Position,
     pub screen_offset: ScreenOffset,
     theme: Theme,
-    clipboard: ClipboardContext,
     highlight: Highlight,
     pub needs_redraw: bool,
     pub buffer: Buffer,
@@ -43,7 +49,6 @@ impl Default for View {
             cursor_position: Position::default(),
             screen_offset: ScreenOffset::default(),
             theme: Theme::default(),
-            clipboard: ClipboardProvider::new().unwrap(),
             highlight: Highlight::default(),
         }
     }
@@ -118,6 +123,7 @@ impl View {
         self.needs_redraw = false;
     }
 
+    #[inline]
     pub fn render_line<T: std::fmt::Display>(row: usize, line: T) {
         let result = Terminal::render_line(row, line);
         debug_assert!(result.is_ok(), "Failed to render line");
@@ -144,8 +150,7 @@ impl View {
     #[inline]
     pub fn move_cursor(&mut self, key_code: Direction) {
         if self.buffer.is_empty() {
-            self.cursor_position.page_up();
-            self.cursor_position.snap_left();
+            self.cursor_position = ORIGIN_POSITION;
         } else {
             key_code.move_cursor(&mut self.cursor_position, &self.buffer);
 
@@ -237,8 +242,11 @@ impl View {
         Terminal::execute().unwrap();
     }
 
-    pub fn handle_event(&mut self, command: EditorCommand) {
+    pub fn handle_event(&mut self, command: EditorCommand) -> bool {
         //match the event to the enum value and handle the event accrodingly
+        //return true to continue false to quit
+        //so we can propogate up quit from vim mode
+        let mut continue_status: bool = true;
         match command {
             EditorCommand::Move(direction) => self.move_cursor(direction),
             EditorCommand::JumpWord(direction) => self.jump_word(direction),
@@ -255,7 +263,9 @@ impl View {
                 self.theme.set_theme();
             }
             EditorCommand::Paste => {
-                let paste_text = self.clipboard.get_contents().unwrap();
+                let Ok(paste_text) = ClipboardUtils::get_text_from_clipboard() else {
+                    return true;
+                };
                 self.buffer
                     .add_text_from_clipboard(&paste_text, &mut self.cursor_position);
             }
@@ -295,59 +305,19 @@ impl View {
                     self.cursor_position,
                     self.screen_offset,
                     self.size,
-                    &self.buffer,
+                    &mut self.buffer,
                 );
-                vim_mode.run(
+                continue_status = vim_mode.run(
                     &mut self.cursor_position,
                     &mut self.screen_offset,
                     &mut self.size,
                 );
-                //self.enter_vim_mode()
             }
-            _ => {}
+            EditorCommand::Quit | EditorCommand::None => return false,
         }
         self.needs_redraw = true;
+        continue_status
     }
-
-    /*
-    fn enter_vim_mode(&mut self) {
-        loop {
-            let Ok(read_event) = read() else { continue }; //skipping an error on read cursor action
-
-            match VimModeCommands::try_from(read_event) {
-                Ok(event) => match event {
-                    VimModeCommands::Move(dir) => match dir {
-                        Direction::Right
-                        | Direction::Left
-                        | Direction::Up
-                        | Direction::Down
-                        | Direction::End
-                        | Direction::Home => {
-                            self.move_cursor(dir);
-                        }
-                        _ => continue,
-                    },
-                    VimModeCommands::Resize(size) => self.resize(size),
-                    VimModeCommands::Exit => return,
-                    VimModeCommands::NoAction => continue, // skipping other
-                },
-                Err(_) => continue, //ignoring error
-            }
-            if self.needs_redraw {
-                Terminal::clear_screen().unwrap();
-                Terminal::hide_cursor().unwrap();
-                Terminal::move_cursor_to(self.screen_offset.to_position()).unwrap();
-                self.render();
-                Terminal::move_cursor_to(self.cursor_position.view_height(&self.screen_offset))
-                    .unwrap();
-                Terminal::show_cursor().unwrap();
-            } else {
-                Terminal::move_cursor_to(self.cursor_position).unwrap();
-            }
-            Terminal::execute().unwrap();
-        }
-    }
-    */
 
     fn new_line(&mut self) {
         let grapheme_len = if self.buffer.is_empty() {
@@ -402,7 +372,7 @@ impl View {
     }
 
     fn deletion(&mut self) {
-        if self.buffer.is_empty() {
+        if self.buffer.is_empty() || self.cursor_position == ORIGIN_POSITION {
             return;
         }
         match self.cursor_position.width {
@@ -634,14 +604,16 @@ impl View {
             .generate_copy_str(&self.buffer, &self.cursor_position);
 
         if !copy_string.is_empty() {
-            self.copy_text_to_clipboard(copy_string);
+            let res = self.copy_text_to_clipboard(copy_string);
+            debug_assert!(res.is_ok());
         }
         self.highlight.clean_up();
     }
 
     #[inline]
-    fn copy_text_to_clipboard(&mut self, content: String) {
-        self.clipboard.set_contents(content).unwrap();
+    fn copy_text_to_clipboard(&mut self, content: String) -> Result<(), Box<dyn Error>> {
+        ClipboardUtils::copy_text_to_clipboard(content)?;
+        Ok(())
     }
 
     fn batch_delete(&mut self) {
