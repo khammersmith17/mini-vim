@@ -23,7 +23,8 @@ Ctrl-c = Help\
 Ctrl-f = Search\
 Ctrl-t = Theme\
 Ctrl-v = paste text\
-Ctrl-j = Jump Cursor Mode
+Ctrl-j = Jump Cursor Mode\
+Ctrl-n = Vim mode
 
 ## Search Mode
 Type text to search. The cursor will move to the first match. All search hits will be highlighted. The screen state will revert to pre search state when there are no matches.\
@@ -56,7 +57,13 @@ k = up\
 l = right\
 0 = snap left\
 $ = snap right\
-Esc = exit vim mode
+Esc = exit vim mode\
+gg = page up\
+GG = page down\
+:w = write\
+:wq = write and quit\
+:q = quit\
+:q! = quit without saving
 
 ## Jump Cursor Mode
 Type new line location when prompted. Press enter to jump to line

@@ -1,13 +1,17 @@
+use super::clipboard_interface::ClipboardUtils;
+use crate::editor::editorcommands::HighlightCommand;
 use crate::editor::{
-    terminal::{Position, ScreenOffset, Size, Terminal},
-    view::Buffer,
+    terminal::{Coordinate, Position, ScreenOffset, Size, Terminal},
+    view::{Buffer, Mode},
 };
+use crossterm::event::read;
 use crossterm::style::{Color, Print, PrintStyledContent, StyledContent, Stylize};
-use std::ops::RangeInclusive;
+use std::ops::{Range, RangeInclusive};
 
 /// type to identify the direction the highlight goes in
-#[derive(Copy, Clone, Default)]
-pub enum HighlightOrientation {
+/// whether the highlight is going forward or backward
+#[derive(Copy, Clone, Default, PartialEq)]
+pub enum Orientation {
     #[default]
     StartFirst,
     EndFirst,
@@ -22,80 +26,178 @@ pub enum LineType {
 }
 
 /// type to handle the highlighting and copy logic
-// TODO:
-// add the end position of the highlight as a member
-// refactor the changes to update the member
-pub struct Highlight {
-    pub end: Position,
-    pub or: HighlightOrientation,
-    pub render: bool,
-    pub line_range: RangeInclusive<usize>,
+pub struct Highlight<'a> {
+    end: Position, // one copy owned here, the end of the highlight
+    offset: ScreenOffset,
+    or: Orientation,
+    line_range: RangeInclusive<usize>,
+    start: &'a mut Position, // one mutably borrowed, the view position
+    size: &'a mut Size,
+    buffer: &'a mut Buffer,
 }
 
-impl Default for Highlight {
-    fn default() -> Highlight {
+impl Highlight<'_> {
+    pub fn new<'a>(
+        end: &'a mut Position,
+        offset: ScreenOffset,
+        size: &'a mut Size,
+        buffer: &'a mut Buffer,
+    ) -> Highlight<'a> {
         Highlight {
-            render: false,
+            offset,
+            end: *end, // essentially making a copy
+            or: Orientation::default(),
             line_range: 0..=0,
-            or: HighlightOrientation::default(),
-            end: Position::default(),
+            start: end, // the immutable reference
+            size,
+            buffer,
         }
     }
-}
-
-impl Highlight {
-    pub fn clean_up(&mut self) {
-        self.render = false;
-        self.line_range = 0..=0;
-        self.or = HighlightOrientation::default();
-        self.end = Position::default();
-    }
-
-    pub fn adjust_range(&mut self, pos1: &Position) {
-        match self.or {
-            HighlightOrientation::StartFirst => {
-                self.line_range = pos1.height..=self.end.height;
+    pub fn run(&mut self, highlight: Color, text: Color) {
+        self.status_line(); // to see status line before first event is read
+        Terminal::move_cursor_to(self.end).unwrap();
+        Terminal::execute().unwrap();
+        loop {
+            let Ok(read_event) = read() else { continue }; //skipping errors here
+            match HighlightCommand::try_from(read_event) {
+                Ok(event) => match event {
+                    HighlightCommand::Move(dir) => dir.move_cursor(&mut self.end, &*self.buffer),
+                    HighlightCommand::Copy => {
+                        break;
+                    }
+                    HighlightCommand::Resize(new_size) => *self.size = new_size,
+                    HighlightCommand::RevertState => {
+                        return;
+                    }
+                    HighlightCommand::Delete => {
+                        if *self.start != self.end {
+                            self.batch_delete();
+                        }
+                        return;
+                    }
+                    HighlightCommand::NoAction => continue,
+                },
+                Err(_) => continue,
             }
-            HighlightOrientation::EndFirst => {
-                self.line_range = self.end.height..=pos1.height;
-            }
-        }
-    }
 
-    pub fn resolve_orientation(&mut self, pos1: &Position) {
-        if pos1.height == self.end.height {
-            if pos1.width <= self.end.width {
-                self.or = HighlightOrientation::StartFirst;
+            self.update_offset();
+            self.resolve_orientation();
+            self.adjust_range();
+            Terminal::hide_cursor().unwrap();
+            Terminal::clear_screen().unwrap();
+            self.render();
+
+            if self.start.height == self.end.height {
+                self.render_single_line(highlight, text);
             } else {
-                self.or = HighlightOrientation::EndFirst;
+                self.multi_line_render(highlight, text);
+            }
+
+            Terminal::move_cursor_to(self.end.view_height(&self.offset)).unwrap();
+            Terminal::show_cursor().unwrap();
+            Terminal::execute().unwrap();
+        }
+
+        let copy_string = self.generate_copy_str(&*self.start);
+
+        if !copy_string.is_empty() {
+            let res = ClipboardUtils::copy_text_to_clipboard(copy_string);
+            debug_assert!(res.is_ok());
+        }
+    }
+
+    #[inline]
+    fn status_line(&self) {
+        Terminal::render_status_line(
+            Mode::Highlight,
+            self.buffer.is_saved,
+            &self.size,
+            self.buffer.filename.as_deref(),
+            Some((self.end.height.saturating_add(1), self.buffer.len())),
+        )
+        .unwrap();
+    }
+
+    fn render(&self) {
+        #[allow(clippy::integer_division)]
+        for current_row in self.offset.height
+            ..self
+                .offset
+                .height
+                .saturating_add(self.size.height)
+                .saturating_sub(1)
+        {
+            let relative_row = current_row.saturating_sub(self.offset.height);
+
+            if self.line_range.contains(&current_row) {
+                // going to handle rendering these lines with the highlight range
+                // want to skip this so we do not render twice
+                continue;
+            }
+
+            if let Some(line) = self.buffer.text.get(current_row) {
+                Terminal::render_line(
+                    relative_row,
+                    line.get_line_subset(
+                        self.offset.width..self.offset.width.saturating_add(self.size.width),
+                    ),
+                )
+                .unwrap();
+            } else {
+                Terminal::render_line(relative_row, "~").unwrap();
+            }
+        }
+        self.status_line();
+    }
+
+    pub fn adjust_range(&mut self) {
+        match self.or {
+            Orientation::StartFirst => {
+                self.line_range = self.start.height..=self.end.height;
+            }
+            Orientation::EndFirst => {
+                self.line_range = self.end.height..=self.start.height;
+            }
+        }
+    }
+
+    pub fn resolve_orientation(&mut self) {
+        if self.start.height == self.end.height {
+            if self.start.width <= self.end.width {
+                self.or = Orientation::StartFirst;
+            } else {
+                self.or = Orientation::EndFirst;
             }
             return;
         }
-        if pos1.height < self.end.height {
-            self.or = HighlightOrientation::StartFirst;
+        if self.start.height < self.end.height {
+            self.or = Orientation::StartFirst;
         } else {
-            self.or = HighlightOrientation::EndFirst;
+            self.or = Orientation::EndFirst;
         }
     }
-    pub fn generate_copy_str(&self, buffer: &Buffer, start: &Position) -> String {
+    pub fn generate_copy_str(&self, start: &Position) -> String {
         let mut copy_string = String::new();
         if start.height == self.end.height {
-            let line_len = buffer.text[start.height].raw_string.len().saturating_sub(1);
-            let line_string = &buffer.text[start.height].raw_string;
+            let line_len = self.buffer.text[start.height]
+                .raw_string
+                .len()
+                .saturating_sub(1);
+            let line_string = &self.buffer.text[start.height].raw_string;
             let slice: String = if self.end.width == line_len {
-                line_string[start.width..].to_string()
+                line_string[start.width..].to_owned()
             } else {
-                line_string[start.width..self.end.width].to_string()
+                line_string[start.width..self.end.width].to_owned()
             };
             copy_string.push_str(&slice);
         } else {
-            copy_string.push_str(&buffer.text[start.height].raw_string[start.width..]);
+            copy_string.push_str(&self.buffer.text[start.height].raw_string[start.width..]);
             copy_string.push('\n');
             for h in start.height.saturating_add(1)..self.end.height {
-                copy_string.push_str(&buffer.text[h].raw_string);
+                copy_string.push_str(&self.buffer.text[h].raw_string);
                 copy_string.push('\n');
             }
-            copy_string.push_str(&buffer.text[self.end.height].raw_string[..=self.end.width]);
+            copy_string.push_str(&self.buffer.text[self.end.height].raw_string[..=self.end.width]);
         }
         copy_string
     }
@@ -103,7 +205,7 @@ impl Highlight {
     pub fn render_highlight_line(
         line: &str,
         height: usize,
-        h_range: RangeInclusive<usize>,
+        h_range: Range<usize>,
         ctx: &LineType,
         h_color: Color,
         t_color: Color,
@@ -111,7 +213,7 @@ impl Highlight {
         Terminal::move_cursor_to(Position { height, width: 0 }).unwrap();
         Terminal::clear_line().unwrap();
 
-        let segment_to_highlight: String = line[h_range.clone()].to_string();
+        let segment_to_highlight: String = line[h_range.clone()].to_owned();
         let highlight_seg: StyledContent<String> =
             segment_to_highlight.clone().with(t_color).on(h_color);
 
@@ -123,71 +225,67 @@ impl Highlight {
             }
             LineType::Leading => {
                 Terminal::queue_command(PrintStyledContent(highlight_seg)).unwrap();
-                Terminal::queue_command(Print(&line[(h_range.end().saturating_add(1))..])).unwrap();
+                Terminal::queue_command(Print(&line[(h_range.end)..])).unwrap();
             }
             LineType::Trailing => {
-                Terminal::queue_command(Print(&line[..*h_range.start()])).unwrap();
+                Terminal::queue_command(Print(&line[..h_range.start])).unwrap();
                 Terminal::queue_command(PrintStyledContent(highlight_seg)).unwrap();
             }
             LineType::Middle => {
-                Terminal::queue_command(Print(&line[..*h_range.start()])).unwrap();
+                Terminal::queue_command(Print(&line[..h_range.start])).unwrap();
                 Terminal::queue_command(PrintStyledContent(highlight_seg)).unwrap();
-                Terminal::queue_command(Print(&line[(h_range.end().saturating_add(1))..])).unwrap();
+                Terminal::queue_command(Print(&line[h_range.end..])).unwrap();
             }
         }
     }
 
-    pub fn update_offset(&self, offset: &mut ScreenOffset, size: &Size) {
+    pub fn update_offset(&mut self) {
         // adding a method to handle the offset when
         // the end goes off screen of the highlight
         // block goes off screen
         // taken from View::update_offset_single_move
         // with different parameters to update the highlight end
-        if self.end.height >= (size.height.saturating_add(offset.height)).saturating_sub(1) {
-            offset.height = std::cmp::min(
-                offset.height.saturating_add(1),
+        if self.end.height
+            >= (self.size.height.saturating_add(self.offset.height)).saturating_sub(1)
+        {
+            self.offset.height = std::cmp::min(
+                self.offset.height.saturating_add(1),
                 self.end
                     .height
-                    .saturating_sub(size.height)
+                    .saturating_sub(self.size.height)
                     .saturating_add(2), // space for file info line
             );
         }
         // if height moves less than the offset -> decrement height
-        if self.end.height <= offset.height {
-            offset.height = self.end.height;
+        if self.end.height <= self.offset.height {
+            self.offset.height = self.end.height;
         }
         //if widith less than offset -> decerement width
-        if self.end.width < offset.width {
-            offset.width = self.end.width;
+        if self.end.width < self.offset.width {
+            self.offset.width = self.end.width;
         }
         // if new position is greater than offset, offset gets current_width - screen width
         // this better handles snapping the cursor to the end of the line
-        if self.end.width >= size.width.saturating_add(offset.width) {
+        if self.end.width >= self.size.width.saturating_add(self.offset.width) {
             //self.screen_offset.width = self.screen_offset.width.saturating_sub(1);
-            offset.width = offset.width.saturating_add(1);
+            self.offset.width = self.offset.width.saturating_add(1);
         }
     }
 
-    pub fn render_single_line(
-        &self,
-        start_pos: &Position,
-        buffer: &Buffer,
-        highlight_color: Color,
-        text_color: Color,
-    ) {
+    pub fn render_single_line(&self, highlight_color: Color, text_color: Color) {
         let h_r = match self.or {
-            HighlightOrientation::EndFirst => self.end.width..=start_pos.width,
-            HighlightOrientation::StartFirst => start_pos.width..=self.end.width,
+            Orientation::EndFirst => self.end.width..self.start.width,
+            Orientation::StartFirst => self.start.width..self.end.width,
         };
 
         // cond for is the highlight ends at the end of the line
-        let te = buffer.text[start_pos.height]
+        let te = self.buffer.text[self.start.height]
             .raw_string
             .len()
             .saturating_sub(1)
-            == *h_r.end();
+            == h_r.end;
         // cond for if the highlight starts at pos 0
-        let ts = *h_r.start() == 0;
+        let ts = h_r.start == 0;
 
         // determine how the single line needs to be highlighted
         let h_t = match (te, ts) {
@@ -198,8 +296,8 @@ impl Highlight {
         };
 
         Self::render_highlight_line(
-            &buffer.text[start_pos.height].raw_string,
-            start_pos.height,
+            &*self.buffer.text[self.start.height].raw_string,
+            self.start.height,
             h_r,
             &h_t,
             highlight_color,
@@ -207,22 +305,14 @@ impl Highlight {
         );
     }
 
-    pub fn multi_line_render(
-        &self,
-        start_pos: &Position,
-        screen_offset: &ScreenOffset,
-        size: &Size,
-        buffer: &Buffer,
-        highlight_color: Color,
-        text_color: Color,
-    ) {
+    pub fn multi_line_render(&self, highlight_color: Color, text_color: Color) {
         let visible_height_range = RangeInclusive::new(
-            screen_offset.height,
-            screen_offset.height.saturating_add(size.height),
+            self.offset.height,
+            self.offset.height.saturating_add(self.size.height),
         );
         let visible_width_range = RangeInclusive::new(
-            screen_offset.width,
-            screen_offset.width.saturating_add(size.width),
+            self.offset.width,
+            self.offset.width.saturating_add(self.size.width),
         );
 
         for line_height in self.line_range.clone() {
@@ -231,7 +321,7 @@ impl Highlight {
                 continue;
             }
 
-            let line_text = &buffer.text[line_height].raw_string;
+            let line_text = &self.buffer.text[line_height].raw_string;
             // if line width not on screen
             if line_text.len().saturating_sub(1) < *visible_width_range.start() {
                 continue;
@@ -250,20 +340,20 @@ impl Highlight {
 
             // when the line is the start
             // need to handle a partial line highlight
-            if line_height == start_pos.height {
+            if line_height == self.start.height {
                 match self.or {
-                    HighlightOrientation::StartFirst => Self::render_highlight_line(
+                    Orientation::StartFirst => Self::render_highlight_line(
                         visible_line,
-                        line_height.saturating_sub(screen_offset.height),
-                        start_pos.width..=visible_line.len().saturating_sub(1),
+                        line_height.saturating_sub(self.offset.height),
+                        self.start.width..visible_line.len(),
                         &LineType::Trailing,
                         highlight_color,
                         text_color,
                     ),
-                    HighlightOrientation::EndFirst => Self::render_highlight_line(
+                    Orientation::EndFirst => Self::render_highlight_line(
                         visible_line,
-                        line_height.saturating_sub(screen_offset.height),
-                        0..=start_pos.width,
+                        line_height.saturating_sub(self.offset.height),
+                        0..self.start.width.saturating_add(1),
                         &LineType::Leading,
                         highlight_color,
                         text_color,
@@ -276,18 +366,18 @@ impl Highlight {
             // need to handle a partial line highlight
             if line_height == self.end.height {
                 match self.or {
-                    HighlightOrientation::StartFirst => Highlight::render_highlight_line(
+                    Orientation::StartFirst => Highlight::render_highlight_line(
                         visible_line,
-                        line_height.saturating_sub(screen_offset.height),
-                        0..=self.end.width,
+                        line_height.saturating_sub(self.offset.height),
+                        0..self.end.width,
                         &LineType::Leading,
                         highlight_color,
                         text_color,
                     ),
-                    HighlightOrientation::EndFirst => Highlight::render_highlight_line(
+                    Orientation::EndFirst => Highlight::render_highlight_line(
                         visible_line,
-                        line_height.saturating_sub(screen_offset.height),
-                        self.end.width..=visible_line.len().saturating_sub(1),
+                        line_height.saturating_sub(self.offset.height),
+                        self.end.width..visible_line.len(),
                         &LineType::Trailing,
                         highlight_color,
                         text_color,
@@ -299,12 +389,81 @@ impl Highlight {
             // if we get here, we are highlighting the whole line
             Highlight::render_highlight_line(
                 visible_line,
-                line_height.saturating_sub(screen_offset.height),
-                0..=visible_line.len().saturating_sub(1),
+                line_height.saturating_sub(self.offset.height),
+                0..visible_line.len(),
                 &LineType::All,
                 highlight_color,
                 text_color,
             );
+        }
+    }
+
+    fn batch_delete(&mut self) {
+        self.resolve_orientation();
+
+        if self.start.diff_height(&self.end) == 0 {
+            match self.or {
+                Orientation::StartFirst => self.buffer.delete_segment(&self.start, &mut self.end),
+                Orientation::EndFirst => self.buffer.delete_segment(&self.end, &mut self.start),
+            }
+        } else {
+            if self.start.diff_height(&self.end) > 1 {
+                let range_iter = match self.or {
+                    Orientation::StartFirst => {
+                        (self.start.height.saturating_add(1)..self.end.height).rev()
+                    }
+                    Orientation::EndFirst => {
+                        (self.end.height.saturating_add(1)..self.start.height).rev()
+                    }
+                };
+
+                for line in range_iter {
+                    self.buffer.pop_line(line);
+                }
+            }
+
+            //delete everything left of bottom position
+            //delete everything right of top position
+            //join the lines
+            match self.or {
+                Orientation::StartFirst => {
+                    self.end.set_height(self.start.height.saturating_add(1));
+                    self.buffer.delete_segment(
+                        &Position {
+                            width: 0,
+                            height: self.end.height,
+                        },
+                        &mut self.end,
+                    );
+                    self.buffer.delete_segment(
+                        &self.start,
+                        &mut Position {
+                            width: self.buffer.text[self.start.height].len().saturating_sub(1),
+                            height: self.start.height,
+                        },
+                    );
+                    self.buffer.join_line(self.end.height);
+                }
+                Orientation::EndFirst => {
+                    self.start.set_height(self.end.height.saturating_add(1));
+                    self.buffer.delete_segment(
+                        &self.start,
+                        &mut Position {
+                            width: self.buffer.text[self.end.height].len().saturating_sub(1),
+                            height: self.end.height,
+                        },
+                    );
+                    self.buffer.delete_segment(
+                        &Position {
+                            width: 0,
+                            height: self.start.height,
+                        },
+                        &mut self.start,
+                    );
+                    self.buffer.join_line(self.start.height);
+                    self.start.set_position(self.end);
+                }
+            }
         }
     }
 }

@@ -61,7 +61,7 @@ impl TryFrom<&str> for TextFragment {
         };
 
         Ok(Self {
-            grapheme: new_item.to_string(),
+            grapheme: new_item.to_owned(),
             render_width: fragment_width,
             replacement_text: replacement,
         })
@@ -254,7 +254,7 @@ impl Line {
                     _ => None,
                 };
                 TextFragment {
-                    grapheme: grapheme.to_string(),
+                    grapheme: grapheme.to_owned(),
                     render_width: grapheme_width,
                     replacement_text: replacement,
                 }
@@ -263,7 +263,7 @@ impl Line {
 
         Self {
             string: line,
-            raw_string: line_str.to_string(),
+            raw_string: line_str.to_owned(),
         }
     }
 

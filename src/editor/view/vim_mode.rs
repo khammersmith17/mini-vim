@@ -49,7 +49,7 @@ impl VimMode<'_> {
         screen_offset: &mut ScreenOffset,
         size: &mut Size,
     ) -> bool {
-        self.render_status_line();
+        self.status_line();
         Terminal::move_cursor_to(self.cursor_position.view_height(&self.screen_offset)).unwrap();
         Terminal::execute().unwrap();
         loop {
@@ -92,7 +92,7 @@ impl VimMode<'_> {
             Terminal::move_cursor_to(self.screen_offset.to_position()).unwrap();
             Terminal::clear_screen().unwrap();
             self.render();
-            self.render_status_line();
+            self.status_line();
             Terminal::move_cursor_to(self.cursor_position.view_height(&self.screen_offset))
                 .unwrap();
             Terminal::show_cursor().unwrap();
@@ -109,7 +109,7 @@ impl VimMode<'_> {
     }
 
     #[inline]
-    fn render_status_line(&self) {
+    fn status_line(&self) {
         Terminal::render_status_line(
             Mode::VimMode,
             self.buffer.is_saved,

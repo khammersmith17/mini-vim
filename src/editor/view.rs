@@ -1,12 +1,8 @@
-use super::editorcommands::{
-    Direction, EditorCommand, FileNameCommand, HighlightCommand, JumpCommand,
-};
+use super::editorcommands::{Direction, EditorCommand, FileNameCommand, JumpCommand};
 use super::terminal::{Coordinate, Mode, Position, ScreenOffset, Size, Terminal};
 use crossterm::event::read;
-use std::error::Error;
 pub mod buffer;
 use buffer::Buffer;
-use std::cmp::min;
 pub mod line;
 mod theme;
 use theme::Theme;
@@ -15,7 +11,7 @@ use search::Search;
 pub mod help;
 use help::Help;
 mod highlight;
-use highlight::{Highlight, HighlightOrientation};
+use highlight::Highlight;
 mod vim_mode;
 use vim_mode::VimMode;
 mod clipboard_interface;
@@ -35,7 +31,6 @@ pub struct View {
     pub cursor_position: Position,
     pub screen_offset: ScreenOffset,
     theme: Theme,
-    highlight: Highlight,
     pub needs_redraw: bool,
     pub buffer: Buffer,
 }
@@ -49,7 +44,6 @@ impl Default for View {
             cursor_position: Position::default(),
             screen_offset: ScreenOffset::default(),
             theme: Theme::default(),
-            highlight: Highlight::default(),
         }
     }
 }
@@ -70,12 +64,6 @@ impl View {
         {
             let relative_row = current_row.saturating_sub(self.screen_offset.height);
 
-            if self.highlight.render & self.highlight.line_range.contains(&current_row) {
-                // going to handle rendering these lines with the highlight range
-                // want to skip this so we do not render twice
-                continue;
-            }
-
             if let Some(line) = self.buffer.text.get(current_row) {
                 Self::render_line(
                     relative_row,
@@ -94,31 +82,17 @@ impl View {
             }
         }
 
-        // TODO:
-        // when in highlight mode consider end
-        // when in normal mode consider the position
-        if self.highlight.render {
-            Terminal::render_status_line(
-                Mode::Highlight,
-                self.buffer.is_saved,
-                &self.size,
-                self.buffer.filename.as_deref(),
-                Some((
-                    self.cursor_position.height.saturating_add(1),
-                    self.buffer.len(),
-                )),
-            )
-            .unwrap();
-        } else {
-            Terminal::render_status_line(
-                Mode::Insert,
-                self.buffer.is_saved,
-                &self.size,
-                self.buffer.filename.as_deref(),
-                Some((self.cursor_position.height, self.buffer.len())),
-            )
-            .unwrap();
-        }
+        Terminal::render_status_line(
+            Mode::Insert,
+            self.buffer.is_saved,
+            &self.size,
+            self.buffer.filename.as_deref(),
+            Some((
+                self.cursor_position.height.saturating_add(1),
+                self.buffer.len(),
+            )),
+        )
+        .unwrap();
 
         self.needs_redraw = false;
     }
@@ -143,6 +117,8 @@ impl View {
         if let Ok(buffer) = Buffer::load(filename) {
             self.buffer = buffer;
             self.needs_redraw = true;
+        } else {
+            self.buffer = Buffer::load_named_empty(filename);
         }
     }
 
@@ -153,23 +129,6 @@ impl View {
             self.cursor_position = ORIGIN_POSITION;
         } else {
             key_code.move_cursor(&mut self.cursor_position, &self.buffer);
-
-            let dis =
-                self.cursor_position
-                    .max_displacement_from_view(&self.screen_offset, &self.size, 2);
-            if dis == 1 {
-                self.screen_offset
-                    .update_offset_single_move(&self.cursor_position, &self.size, 1);
-                self.needs_redraw = true;
-            } else if dis > 1 {
-                self.screen_offset.handle_offset_screen_snap(
-                    &self.cursor_position,
-                    &self.size,
-                    1,
-                    self.buffer.len(),
-                );
-                self.needs_redraw = true;
-            }
         }
     }
 
@@ -248,7 +207,10 @@ impl View {
         //so we can propogate up quit from vim mode
         let mut continue_status: bool = true;
         match command {
-            EditorCommand::Move(direction) => self.move_cursor(direction),
+            EditorCommand::Move(direction) => {
+                self.move_cursor(direction);
+                self.check_offset();
+            }
             EditorCommand::JumpWord(direction) => self.jump_word(direction),
             EditorCommand::Resize(size) => {
                 self.resize(size);
@@ -270,8 +232,14 @@ impl View {
                     .add_text_from_clipboard(&paste_text, &mut self.cursor_position);
             }
             EditorCommand::Highlight => {
-                self.highlight.render = true;
-                self.handle_highlight();
+                let mut highlight = Highlight::new(
+                    &mut self.cursor_position,
+                    self.screen_offset,
+                    &mut self.size,
+                    &mut self.buffer,
+                );
+                highlight.run(self.theme.highlight, self.theme.text);
+                self.check_offset() // making sure the offset is correct on a delete
             }
             EditorCommand::Search => {
                 let mut search = Search::new(
@@ -313,7 +281,8 @@ impl View {
                     &mut self.size,
                 );
             }
-            EditorCommand::Quit | EditorCommand::None => return false,
+            EditorCommand::Quit => return false,
+            _ => {}
         }
         self.needs_redraw = true;
         continue_status
@@ -476,6 +445,7 @@ impl View {
         };
     }
 
+    /*
     fn handle_highlight(&mut self) {
         //if buffer is empty -> nothing to highlight
         if self.buffer.is_empty() {
@@ -609,13 +579,17 @@ impl View {
         }
         self.highlight.clean_up();
     }
+    */
 
+    /*
     #[inline]
     fn copy_text_to_clipboard(&mut self, content: String) -> Result<(), Box<dyn Error>> {
         ClipboardUtils::copy_text_to_clipboard(content)?;
         Ok(())
     }
+    */
 
+    /*
     fn batch_delete(&mut self) {
         self.highlight.resolve_orientation(&self.cursor_position);
 
@@ -696,4 +670,5 @@ impl View {
             }
         }
     }
+    */
 }

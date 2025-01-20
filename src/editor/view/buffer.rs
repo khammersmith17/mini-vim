@@ -43,6 +43,14 @@ impl Buffer {
         }
     }
 
+    pub fn load_named_empty(filename: &str) -> Buffer {
+        Self {
+            text: Vec::new(),
+            filename: Some(filename.to_string()),
+            is_saved: false,
+        }
+    }
+
     pub fn load(filename: &str) -> Result<Buffer, Error> {
         let file_contents = read_to_string(filename)?;
         let mut text = Vec::new();

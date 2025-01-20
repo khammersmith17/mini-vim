@@ -91,7 +91,6 @@ impl Theme {
                                     Self::move_cursor(cursor_position);
                                 }
                             }
-
                             KeyCode::Down => {
                                 if choice_index == 4 {
                                     cursor_position =
