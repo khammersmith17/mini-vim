@@ -378,7 +378,207 @@ impl Buffer {
         }
     }
 
+    #[inline]
     pub fn pop_line(&mut self, line_index: usize) {
         self.text.remove(line_index);
+    }
+
+    pub fn begining_of_current_word(&self, pos: &mut Position) {
+        if self.is_empty() {
+            return;
+        }
+        if let Some(new) = self.text[pos.height].begining_of_current_word(pos.width) {
+            pos.width = new;
+            return;
+        }
+
+        while pos.height >= 1 {
+            pos.height = pos.height.saturating_sub(1);
+            if let Some(new) = self.text[pos.height].begining_of_current_word_spillover() {
+                pos.width = new;
+                return;
+            }
+        }
+
+        pos.height = 0;
+        pos.width = 0;
+    }
+
+    pub fn begining_of_next_word(&self, pos: &mut Position) {
+        if self.is_empty() {
+            return;
+        }
+        if let Some(new) = self.text[pos.height].begining_of_next_word(pos.width) {
+            pos.width = new;
+            return;
+        }
+
+        let max = self.len().saturating_sub(1);
+        while pos.height < max {
+            pos.height = pos.height.saturating_add(1);
+            if let Some(new) = self.text[pos.height].begining_of_next_word_spillover() {
+                pos.width = new;
+                return;
+            }
+        }
+        // if we are here we are at the end
+        pos.width = self.text.last().unwrap().grapheme_len();
+    }
+
+    pub fn end_of_current_word(&self, pos: &mut Position) {
+        if self.is_empty() {
+            return;
+        }
+        if let Some(new) = self.text[pos.height].end_of_current_word(pos.width) {
+            pos.width = new;
+            return;
+        }
+
+        let max_height = self.len().saturating_sub(1);
+        while pos.height < max_height {
+            pos.height = pos.height.saturating_add(1);
+            if let Some(thing) = self.text[pos.height].end_of_current_word_spillover() {
+                pos.width = thing;
+                return;
+            }
+        }
+
+        pos.width = self.text.last().unwrap().grapheme_len().saturating_sub(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn end_of_current_word() {
+        let line1 = Line::from("I have a bunch of text");
+        let line2 = Line::from("This is a bunch more text");
+        let lines = vec![line1, line2];
+        let buff = Buffer {
+            text: lines,
+            filename: None,
+            is_saved: true,
+        };
+
+        let mut pos = Position {
+            height: 0,
+            width: 3,
+        };
+
+        buff.end_of_current_word(&mut pos);
+
+        assert_eq!(
+            pos,
+            Position {
+                height: 0,
+                width: 5
+            }
+        );
+    }
+
+    #[test]
+    fn end_of_current_word_spillover() {
+        let line1 = Line::from("I have a bunch of text ");
+        let line2 = Line::from("This is a bunch more text");
+        let lines = vec![line1, line2];
+        let buff = Buffer {
+            text: lines,
+            filename: None,
+            is_saved: true,
+        };
+
+        let mut pos = Position {
+            height: 0,
+            width: 22,
+        };
+        buff.end_of_current_word(&mut pos);
+
+        assert_eq!(
+            pos,
+            Position {
+                height: 1,
+                width: 3
+            }
+        );
+    }
+
+    #[test]
+    fn end_of_current_word_end() {
+        let line1 = Line::from("I have a bunch of text ");
+        let line2 = Line::from("This is a bunch more text");
+        let lines = vec![line1, line2];
+        let buff = Buffer {
+            text: lines,
+            filename: None,
+            is_saved: true,
+        };
+
+        let mut pos = Position {
+            height: 1,
+            width: 22,
+        };
+        buff.end_of_current_word(&mut pos);
+
+        assert_eq!(
+            pos,
+            Position {
+                height: 1,
+                width: 24
+            }
+        );
+    }
+
+    #[test]
+    fn begining_of_current_word() {
+        let line1 = Line::from("I have a bunch of text ");
+        let line2 = Line::from("This is a bunch more text");
+        let lines = vec![line1, line2];
+        let buff = Buffer {
+            text: lines,
+            filename: None,
+            is_saved: true,
+        };
+
+        let mut pos = Position {
+            height: 0,
+            width: 4,
+        };
+        buff.begining_of_current_word(&mut pos);
+
+        assert_eq!(
+            pos,
+            Position {
+                height: 0,
+                width: 2
+            }
+        );
+    }
+
+    #[test]
+    fn begining_of_current_word_origin() {
+        let line1 = Line::from("  I have a bunch of text ");
+        let line2 = Line::from("This is a bunch more text");
+        let lines = vec![line1, line2];
+        let buff = Buffer {
+            text: lines,
+            filename: None,
+            is_saved: true,
+        };
+
+        let mut pos = Position {
+            height: 0,
+            width: 2,
+        };
+        buff.begining_of_current_word(&mut pos);
+
+        assert_eq!(
+            pos,
+            Position {
+                height: 0,
+                width: 0
+            }
+        );
     }
 }

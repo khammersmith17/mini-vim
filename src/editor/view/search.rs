@@ -219,31 +219,14 @@ impl Search {
         )
         .unwrap();
 
-        Terminal::move_cursor_to(self.cursor_position.view_height(&self.screen_offset)).unwrap();
+        Terminal::move_cursor_to(
+            self.cursor_position
+                .relative_view_position(&self.screen_offset),
+        )
+        .unwrap();
         Terminal::show_cursor().unwrap();
         Terminal::execute().unwrap();
     }
-
-    /*
-    fn render_file_info(&self, buffer: &Buffer, height: usize) {
-        let saved = if buffer.is_saved { "saved" } else { "modified" };
-        let filename = match &buffer.filename {
-            Some(file) => file,
-            None => "-",
-        };
-        let render_message = if !buffer.is_empty() {
-            format!("Mode: Search | Filename: {filename} | Status: {saved} | Line: -",)
-        } else {
-            format!(
-                "Mode: Search | Filename: {filename} | Status: {saved} | Line: {} / {}",
-                self.cursor_position.height.saturating_add(1),
-                buffer.len()
-            )
-        };
-
-        Terminal::render_line(height.saturating_sub(1), render_message).unwrap();
-    }
-    */
 
     #[inline]
     fn revert_screen_state(&mut self, pos: &Position, offset: &ScreenOffset) {

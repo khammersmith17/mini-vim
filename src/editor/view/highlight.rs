@@ -93,7 +93,7 @@ impl Highlight<'_> {
                 self.multi_line_render(highlight, text);
             }
 
-            Terminal::move_cursor_to(self.end.view_height(&self.offset)).unwrap();
+            Terminal::move_cursor_to(self.end.relative_view_position(&self.offset)).unwrap();
             Terminal::show_cursor().unwrap();
             Terminal::execute().unwrap();
         }

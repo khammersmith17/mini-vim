@@ -255,6 +255,9 @@ pub enum QueueInitCommand {
 
 pub enum VimModeCommands {
     Move(Direction),
+    StartOfNextWord,
+    EndOfCurrentWord,
+    BeginingOfCurrentWord,
     Paste,
     NoAction,
     Resize(Size),
@@ -274,6 +277,9 @@ impl TryFrom<Event> for VimModeCommands {
                 KeyCode::Char('j') => Ok(Self::Move(Direction::Down)),
                 KeyCode::Char('l') => Ok(Self::Move(Direction::Right)),
                 KeyCode::Char('0') => Ok(Self::Move(Direction::Home)),
+                KeyCode::Char('b') => Ok(Self::BeginingOfCurrentWord),
+                KeyCode::Char('e') => Ok(Self::EndOfCurrentWord),
+                KeyCode::Char('w') => Ok(Self::StartOfNextWord),
                 KeyCode::Char('g') => Ok(Self::ComplexCommand(QueueInitCommand::PageUp)),
                 KeyCode::Char('G') => Ok(Self::ComplexCommand(QueueInitCommand::PageDown)),
                 KeyCode::Char(':') => Ok(Self::ComplexCommand(QueueInitCommand::Colon)),

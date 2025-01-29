@@ -159,7 +159,7 @@ impl Editor {
         Terminal::move_cursor_to(
             self.view
                 .cursor_position
-                .view_height(&self.view.screen_offset),
+                .relative_view_position(&self.view.screen_offset),
         )?;
         Terminal::show_cursor()?;
         Terminal::execute()?;

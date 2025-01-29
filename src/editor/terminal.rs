@@ -171,10 +171,10 @@ impl Position {
         std::cmp::max(height_displacement, width_displacement)
     }
 
-    pub fn view_height(&self, offset: &ScreenOffset) -> Position {
+    pub fn relative_view_position(&self, offset: &ScreenOffset) -> Position {
         Position {
             height: self.height.saturating_sub(offset.height),
-            width: self.width,
+            width: self.width.saturating_sub(offset.width),
         }
     }
 
@@ -275,7 +275,7 @@ impl ScreenOffset {
         if pos.width >= size.width + self.width {
             self.width = pos.width.saturating_sub(size.width).saturating_add(1);
         } else if pos.width < self.width {
-            self.left(1);
+            self.width = pos.width;
         }
     }
 
@@ -527,7 +527,7 @@ impl Terminal {
                 mode.to_string()
             )
         };
-        Self::render_line(size.height.saturating_sub(1), render_message).unwrap();
+        Self::render_line(size.height.saturating_sub(1), render_message)?;
         Ok(())
     }
 

@@ -45,12 +45,13 @@ Move the cursor up or down, and select enter when the cursor is on the color you
 
 ## Highlight Mode
 Move the cursor to highlight text with the arrows.\
+Use the arrow keys to move or use vim single cursor movements./
 Ctrl-c = copy text\
 Backspace = delete text\
 Esc = revert to pre highlight screen state
 
 ## Vim Mode
-Right now the only support keys are h, j, k, l, 0, $. gg and GG are being added. Vim motions will also be available in highlight mode as well soon.\
+Not all vim commands are support as of yet. Currently supported:/
 h = left\
 j = down\
 k = up\

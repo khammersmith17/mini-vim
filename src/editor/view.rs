@@ -214,6 +214,7 @@ impl View {
             EditorCommand::JumpWord(direction) => self.jump_word(direction),
             EditorCommand::Resize(size) => {
                 self.resize(size);
+                self.check_offset(); // offset may no longer be on screen
             }
             EditorCommand::Save => {
                 if self.buffer.filename.is_none() {
@@ -264,6 +265,7 @@ impl View {
             EditorCommand::Delete => self.deletion(),
             EditorCommand::NewLine => {
                 self.new_line();
+                self.check_offset(); //may need to snap back
             }
             EditorCommand::Help => {
                 Help::render_help(&mut self.size);
@@ -359,6 +361,9 @@ impl View {
                 _ => {
                     // get length of 1 line above
                     // this will be new width after join line operation
+                    // TODO:
+                    // figure out where to set the cursor
+                    // currently there is odd behavior when shifting the screen
                     let prev_line_width = self.buffer.text
                         [self.cursor_position.height.saturating_sub(1)]
                     .grapheme_len();

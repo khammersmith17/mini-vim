@@ -15,20 +15,6 @@ pub struct VimMode<'a> {
     buffer: &'a mut Buffer,
 }
 
-/*
-enum QueueCommands {
-    UpperG,
-    LowerG,
-    Colon,
-    Write,
-    Quit,
-}
-*/
-
-// process command and stay in vim mode - 1_u8
-// quit vim mode - 2_u8
-// quit terminal session - 3_u8
-
 impl VimMode<'_> {
     pub fn new<'a>(
         cursor_position: Position,
@@ -50,7 +36,11 @@ impl VimMode<'_> {
         size: &mut Size,
     ) -> bool {
         self.status_line();
-        Terminal::move_cursor_to(self.cursor_position.view_height(&self.screen_offset)).unwrap();
+        Terminal::move_cursor_to(
+            self.cursor_position
+                .relative_view_position(&self.screen_offset),
+        )
+        .unwrap();
         Terminal::execute().unwrap();
         loop {
             let Ok(read_event) = read() else { continue }; //skipping an error on read cursor action
@@ -68,6 +58,15 @@ impl VimMode<'_> {
                         }
                         _ => continue,
                     },
+                    VimModeCommands::StartOfNextWord => {
+                        self.buffer.begining_of_next_word(&mut self.cursor_position)
+                    }
+                    VimModeCommands::EndOfCurrentWord => {
+                        self.buffer.end_of_current_word(&mut self.cursor_position)
+                    }
+                    VimModeCommands::BeginingOfCurrentWord => self
+                        .buffer
+                        .begining_of_current_word(&mut self.cursor_position),
                     VimModeCommands::ComplexCommand(queue_command) => {
                         // if we get true back, staying in vim mode
                         // else user is exiting the session
@@ -93,8 +92,11 @@ impl VimMode<'_> {
             Terminal::clear_screen().unwrap();
             self.render();
             self.status_line();
-            Terminal::move_cursor_to(self.cursor_position.view_height(&self.screen_offset))
-                .unwrap();
+            Terminal::move_cursor_to(
+                self.cursor_position
+                    .relative_view_position(&self.screen_offset),
+            )
+            .unwrap();
             Terminal::show_cursor().unwrap();
             Terminal::execute().unwrap();
         }
