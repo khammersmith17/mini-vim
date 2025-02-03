@@ -2,11 +2,22 @@ use super::clipboard_interface::ClipboardUtils;
 use crate::editor::Terminal;
 use crate::editor::{
     editorcommands::{
-        ColonQueueActions, Direction, QueueInitCommand, VimColonQueue, VimModeCommands,
+        parse_highlight_vim_mode, ColonQueueActions, Direction, QueueInitCommand, VimColonQueue,
+        VimModeCommands,
     },
-    view::{Buffer, Coordinate, Mode, Position, ScreenOffset, Size},
+    view::{
+        help::VimHelpScreen, highlight::Highlight, Buffer, Coordinate, Mode, Position,
+        ScreenOffset, Size,
+    },
 };
 use crossterm::event::{read, Event, KeyCode, KeyEvent};
+use crossterm::style::Color;
+
+enum ContinueState {
+    ExitSession,
+    ContinueVim,
+    ContinueVimPersistError,
+}
 
 pub struct VimMode<'a> {
     cursor_position: Position,
@@ -34,6 +45,8 @@ impl VimMode<'_> {
         cursor_position: &mut Position,
         screen_offset: &mut ScreenOffset,
         size: &mut Size,
+        h_color: Color,
+        t_color: Color,
     ) -> bool {
         self.status_line();
         Terminal::move_cursor_to(
@@ -70,9 +83,28 @@ impl VimMode<'_> {
                     VimModeCommands::ComplexCommand(queue_command) => {
                         // if we get true back, staying in vim mode
                         // else user is exiting the session
-                        if !self.determine_queue_command(queue_command) {
-                            return false;
+                        match self.determine_queue_command(queue_command) {
+                            ContinueState::ContinueVimPersistError => continue,
+                            ContinueState::ContinueVim => {} // no action
+                            ContinueState::ExitSession => return false,
                         }
+                        /*
+                                                if !self.determine_queue_command(queue_command) {
+                                                    return false;
+                                                } else {
+                                                    continue;
+                                                }
+                        */
+                    }
+                    VimModeCommands::Highlight => {
+                        let mut highlight = Highlight::new(
+                            &mut self.cursor_position,
+                            self.screen_offset,
+                            &mut self.size,
+                            &mut self.buffer,
+                        );
+                        highlight.run(h_color, t_color, parse_highlight_vim_mode);
+                        self.resolve_displacement() // making sure the offset is correct on a delete
                     }
                     VimModeCommands::Resize(new_size) => self.resize(new_size),
                     VimModeCommands::Exit => {
@@ -82,7 +114,9 @@ impl VimMode<'_> {
                         return true;
                     }
                     VimModeCommands::Paste => self.add_to_clipboard(),
-                    VimModeCommands::NoAction => continue, // skipping other
+                    VimModeCommands::NoAction => {
+                        VimHelpScreen::render_help(&mut self.size, h_color, t_color)
+                    } // skipping other
                 },
                 Err(_) => continue, //ignoring error
             }
@@ -200,7 +234,7 @@ impl VimMode<'_> {
     }
 
     #[inline]
-    fn determine_queue_command(&mut self, command: QueueInitCommand) -> bool {
+    fn determine_queue_command(&mut self, command: QueueInitCommand) -> ContinueState {
         // propogate up the result of the typed command
         // otherwise we are staying in terminal session, thus true
         match command {
@@ -208,17 +242,18 @@ impl VimMode<'_> {
             QueueInitCommand::PageUp => {
                 self.queue_page_up();
                 // stay in vim mode
-                return true;
+                return ContinueState::ContinueVim;
             }
             QueueInitCommand::PageDown => {
                 self.queue_page_down();
                 // stay in vim mode
-                return true;
+
+                return ContinueState::ContinueVim;
             }
         }
     }
 
-    fn queue_colon(&mut self) -> bool {
+    fn queue_colon(&mut self) -> ContinueState {
         // return true if we are staying in vim mode after executing command
         // return false if we are ending the terminal session from here
         // in the case the command executes, propogate up the state result
@@ -232,7 +267,7 @@ impl VimMode<'_> {
                     VimColonQueue::New(c) => queue.push(c), //queue any of these commands
                     VimColonQueue::Backspace => {
                         if queue.is_empty() {
-                            return true;
+                            return ContinueState::ContinueVim;
                         }
                         let _ = queue.pop();
                     }
@@ -259,7 +294,7 @@ impl VimMode<'_> {
         Terminal::execute().unwrap();
     }
 
-    fn eval_colon_queue(&mut self, queue: Vec<ColonQueueActions>) -> bool {
+    fn eval_colon_queue(&mut self, queue: Vec<ColonQueueActions>) -> ContinueState {
         // return true if we are staying in vim mode after executing the command
         // false if we are ending our terminal session
         match queue.len() {
@@ -269,31 +304,35 @@ impl VimMode<'_> {
                     self.buffer.save();
                 }
                 ColonQueueActions::Quit => {
-                    // figure out how to propogate up quit
                     // exit session
-                    return false;
+                    if !self.buffer.is_saved {
+                        self.command_status_line("not saved: ! to override, w: to save");
+                        return ContinueState::ContinueVimPersistError;
+                    }
+                    return ContinueState::ExitSession;
                 }
-                ColonQueueActions::Override => self.command_status_line("Invalid command"),
+                ColonQueueActions::Override => {
+                    self.command_status_line("Invalid command");
+                    return ContinueState::ContinueVimPersistError;
+                }
             },
             2 => {
                 match queue.as_slice() {
                     [ColonQueueActions::Write, ColonQueueActions::Quit] => {
                         self.buffer.save();
-                        // figure out how to propogate up quit
                         // exit terminal session
-                        return false;
+                        return ContinueState::ExitSession;
                     }
                     [ColonQueueActions::Quit, ColonQueueActions::Override] => {
-                        //figure out how to propogate up quit
                         //exit terminal session
-                        return false;
+                        return ContinueState::ExitSession;
                     }
-                    _ => self.command_status_line("Invalid command"),
+                    _ => self.command_status_line("Invalid command!"),
                 }
             }
-            _ => self.command_status_line("Invalid command"),
+            _ => self.command_status_line("Invalid command!"),
         }
-        true
+        ContinueState::ContinueVim
     }
 
     fn map_string_to_queue_vec(string_queue: &str) -> Result<Vec<ColonQueueActions>, String> {

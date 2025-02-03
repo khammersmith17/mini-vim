@@ -3,6 +3,16 @@ use super::terminal::{Coordinate, Position};
 use super::view::buffer::Buffer;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use std::convert::TryFrom;
+use std::error::Error;
+
+pub fn parse_highlight_normal_mode(event: Event) -> Result<HighlightCommand, Box<dyn Error>> {
+    Ok(HighlightCommand::try_from(event)?)
+}
+
+pub fn parse_highlight_vim_mode(event: Event) -> Result<HighlightCommand, Box<dyn Error>> {
+    let vim_hc = VimHighlightCommand::try_from(event)?;
+    Ok(HighlightCommand::try_from(vim_hc)?)
+}
 
 #[derive(Copy, Clone, Debug)]
 pub enum Direction {
@@ -186,11 +196,13 @@ impl TryFrom<Event> for SearchCommand {
     }
 }
 
+#[derive(Default)]
 pub enum HighlightCommand {
     RevertState,
     Copy,
     Resize(Size),
     Move(Direction),
+    #[default]
     NoAction,
     Delete,
 }
@@ -210,6 +222,59 @@ impl TryFrom<Event> for HighlightCommand {
                 (KeyCode::Left, _) | (KeyCode::Char('h'), _) => Ok(Self::Move(Direction::Left)),
                 (KeyCode::Esc, _) => Ok(Self::RevertState),
                 (KeyCode::Backspace, _) => Ok(Self::Delete),
+                _ => Ok(Self::NoAction),
+            },
+            #[allow(clippy::as_conversions)]
+            Event::Resize(width_u16, height_u16) => Ok(Self::Resize(Size {
+                height: height_u16 as usize,
+                width: width_u16 as usize,
+            })),
+            _ => Err("Invalid key press read".into()),
+        }
+    }
+}
+
+// coerce a vim highlight command into the highlight command enum
+// allows to drop in vim commands during highlight mode when appropriate
+impl TryFrom<VimHighlightCommand> for HighlightCommand {
+    type Error = String;
+    fn try_from(v: VimHighlightCommand) -> Result<Self, Self::Error> {
+        match v {
+            VimHighlightCommand::Move(dir) => Ok(Self::Move(dir)),
+            VimHighlightCommand::Copy => Ok(Self::Copy),
+            VimHighlightCommand::Resize(size) => Ok(Self::Resize(size)),
+            VimHighlightCommand::RevertState => Ok(Self::RevertState),
+            VimHighlightCommand::NoAction => Ok(Self::NoAction),
+            VimHighlightCommand::Delete => Ok(Self::Delete),
+        }
+    }
+}
+
+#[derive(Default)]
+pub enum VimHighlightCommand {
+    RevertState,
+    Copy,
+    Resize(Size),
+    Move(Direction),
+    #[default]
+    NoAction,
+    Delete,
+}
+
+impl TryFrom<Event> for VimHighlightCommand {
+    type Error = String;
+    fn try_from(event: Event) -> Result<Self, Self::Error> {
+        match event {
+            Event::Key(KeyEvent { code, .. }) => match code {
+                KeyCode::Char('y') => Ok(Self::Copy),
+                KeyCode::Char('k') => Ok(Self::Move(Direction::Up)),
+                KeyCode::Char('j') => Ok(Self::Move(Direction::Down)),
+                KeyCode::Char('l') => Ok(Self::Move(Direction::Right)),
+                KeyCode::Char('h') => Ok(Self::Move(Direction::Left)),
+                KeyCode::Char('$') => Ok(Self::Move(Direction::End)),
+                KeyCode::Char('0') => Ok(Self::Move(Direction::End)),
+                KeyCode::Char('d') => Ok(Self::Delete),
+                KeyCode::Esc => Ok(Self::RevertState),
                 _ => Ok(Self::NoAction),
             },
             #[allow(clippy::as_conversions)]
@@ -258,6 +323,7 @@ pub enum VimModeCommands {
     StartOfNextWord,
     EndOfCurrentWord,
     BeginingOfCurrentWord,
+    Highlight,
     Paste,
     NoAction,
     Resize(Size),
@@ -270,8 +336,6 @@ impl TryFrom<Event> for VimModeCommands {
     fn try_from(event: Event) -> Result<Self, Self::Error> {
         match event {
             Event::Key(KeyEvent { code, .. }) => match code {
-                KeyCode::Char('$') => Ok(Self::Move(Direction::End)), //represents $
-                KeyCode::Char('p') => Ok(Self::Paste),
                 KeyCode::Char('h') => Ok(Self::Move(Direction::Left)),
                 KeyCode::Char('k') => Ok(Self::Move(Direction::Up)),
                 KeyCode::Char('j') => Ok(Self::Move(Direction::Down)),
@@ -282,6 +346,9 @@ impl TryFrom<Event> for VimModeCommands {
                 KeyCode::Char('w') => Ok(Self::StartOfNextWord),
                 KeyCode::Char('g') => Ok(Self::ComplexCommand(QueueInitCommand::PageUp)),
                 KeyCode::Char('G') => Ok(Self::ComplexCommand(QueueInitCommand::PageDown)),
+                KeyCode::Char('p') => Ok(Self::Paste),
+                KeyCode::Char('v') => Ok(Self::Highlight),
+                KeyCode::Char('$') => Ok(Self::Move(Direction::End)), //represents $
                 KeyCode::Char(':') => Ok(Self::ComplexCommand(QueueInitCommand::Colon)),
                 KeyCode::Esc => Ok(Self::Exit),
                 _ => Ok(Self::NoAction),

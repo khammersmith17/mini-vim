@@ -290,6 +290,10 @@ impl Line {
     }
 
     pub fn begining_of_current_word_spillover(&self) -> Option<usize> {
+        // if the end is alpha
+        // then find next alpha
+        // if end is not alpha
+        // find the next alpha then find the next non alpha
         let len: usize = self.raw_string.len().saturating_sub(1);
         let bytes = self.raw_string.as_bytes();
         if is_alpha(&bytes[len]) {
@@ -315,10 +319,13 @@ impl Line {
             return None;
         }
         let bytes = self.raw_string.as_bytes();
-        let is_a = is_alpha(&bytes[pos]);
         // making sure we are not at the begining of the line
-        let is_left_a = pos > 0 && is_alpha(&bytes[pos.saturating_sub(1)]);
-        match (is_a, is_left_a) {
+        // if the current pos an alphabet char and is the char to the lest if a current alphabet
+        // char
+        match (
+            is_alpha(&bytes[pos]),
+            pos > 0 && is_alpha(&bytes[pos.saturating_sub(1)]),
+        ) {
             (true, true) => {
                 // look for next non alpha char
                 if let Some(new) = self.backward_from_alpha(pos, bytes) {
@@ -370,11 +377,13 @@ impl Line {
             return None;
         }
         let bytes = self.raw_string.as_bytes();
-        let is_a = is_alpha(&bytes[pos]);
         // making sure we are not ad the current end
-        let is_right_a = pos < self.raw_string.len().saturating_sub(1)
-            && is_alpha(&bytes[pos.saturating_add(1)]);
-        let new: Option<usize> = match (is_a, is_right_a) {
+        // if the current char is an alphabet char and checking the char to the right
+        let new: Option<usize> = match (
+            is_alpha(&bytes[pos]),
+            pos < self.raw_string.len().saturating_sub(1)
+                && is_alpha(&bytes[pos.saturating_add(1)]),
+        ) {
             (true, true) => {
                 // find next non alpha and return pos - 1
                 self.forward_from_alpha(pos, bytes)

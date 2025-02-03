@@ -1,4 +1,6 @@
-use super::editorcommands::{Direction, EditorCommand, FileNameCommand, JumpCommand};
+use super::editorcommands::{
+    parse_highlight_normal_mode, Direction, EditorCommand, FileNameCommand, JumpCommand,
+};
 use super::terminal::{Coordinate, Mode, Position, ScreenOffset, Size, Terminal};
 use crossterm::event::read;
 pub mod buffer;
@@ -98,12 +100,12 @@ impl View {
     }
 
     #[inline]
-    pub fn render_line<T: std::fmt::Display>(row: usize, line: T) {
+    fn render_line<T: std::fmt::Display>(row: usize, line: T) {
         let result = Terminal::render_line(row, line);
         debug_assert!(result.is_ok(), "Failed to render line");
     }
 
-    pub fn resize(&mut self, size: Size) {
+    fn resize(&mut self, size: Size) {
         self.size = size;
         self.screen_offset.handle_offset_screen_snap(
             &self.cursor_position,
@@ -124,7 +126,7 @@ impl View {
 
     // inlining because it is a rather straight forward computation
     #[inline]
-    pub fn move_cursor(&mut self, key_code: Direction) {
+    fn move_cursor(&mut self, key_code: Direction) {
         if self.buffer.is_empty() {
             self.cursor_position = ORIGIN_POSITION;
         } else {
@@ -132,6 +134,7 @@ impl View {
         }
     }
 
+    #[inline]
     fn insert_char(&mut self, insert_char: char) {
         self.buffer
             .update_line_insert(&mut self.cursor_position, insert_char);
@@ -139,9 +142,8 @@ impl View {
         self.buffer.is_saved = false;
     }
 
-    #[inline]
     fn insert_tab(&mut self) {
-        self.buffer.insert_tab(&self.cursor_position);
+        self.buffer.insert_tab(&self.cursor_position, 1);
         self.cursor_position.width = self.cursor_position.width.saturating_add(4);
     }
 
@@ -205,32 +207,56 @@ impl View {
         //match the event to the enum value and handle the event accrodingly
         //return true to continue false to quit
         //so we can propogate up quit from vim mode
+        //ordered these in what I think will be how often they are used
         let mut continue_status: bool = true;
         match command {
             EditorCommand::Move(direction) => {
                 self.move_cursor(direction);
                 self.check_offset();
             }
-            EditorCommand::JumpWord(direction) => self.jump_word(direction),
-            EditorCommand::Resize(size) => {
-                self.resize(size);
-                self.check_offset(); // offset may no longer be on screen
+            EditorCommand::Insert(char) => {
+                self.insert_char(char);
+                self.check_offset();
             }
+            EditorCommand::Delete => self.deletion(),
+            EditorCommand::Tab => self.insert_tab(),
+            EditorCommand::NewLine => {
+                self.new_line();
+                self.check_offset(); //may need to snap back
+            }
+            EditorCommand::JumpWord(direction) => self.jump_word(direction),
             EditorCommand::Save => {
                 if self.buffer.filename.is_none() {
                     self.get_file_name();
                 }
                 self.buffer.save();
             }
-            EditorCommand::Theme => {
-                self.theme.set_theme();
+            EditorCommand::Resize(size) => {
+                self.resize(size);
+                self.check_offset(); // cursor may no longer be on screen
             }
+
             EditorCommand::Paste => {
                 let Ok(paste_text) = ClipboardUtils::get_text_from_clipboard() else {
                     return true;
                 };
                 self.buffer
                     .add_text_from_clipboard(&paste_text, &mut self.cursor_position);
+            }
+            EditorCommand::VimMode => {
+                let mut vim_mode = VimMode::new(
+                    self.cursor_position,
+                    self.screen_offset,
+                    self.size,
+                    &mut self.buffer,
+                );
+                continue_status = vim_mode.run(
+                    &mut self.cursor_position,
+                    &mut self.screen_offset,
+                    &mut self.size,
+                    self.theme.highlight,
+                    self.theme.text,
+                );
             }
             EditorCommand::Highlight => {
                 let mut highlight = Highlight::new(
@@ -239,7 +265,11 @@ impl View {
                     &mut self.size,
                     &mut self.buffer,
                 );
-                highlight.run(self.theme.highlight, self.theme.text);
+                highlight.run(
+                    self.theme.highlight,
+                    self.theme.text,
+                    parse_highlight_normal_mode,
+                );
                 self.check_offset() // making sure the offset is correct on a delete
             }
             EditorCommand::Search => {
@@ -256,34 +286,15 @@ impl View {
                     &self.buffer,
                 );
             }
-            EditorCommand::Insert(char) => {
-                self.insert_char(char);
-                self.check_offset();
-            }
-            EditorCommand::Tab => self.insert_tab(),
             EditorCommand::JumpLine => self.jump_cursor(),
-            EditorCommand::Delete => self.deletion(),
-            EditorCommand::NewLine => {
-                self.new_line();
-                self.check_offset(); //may need to snap back
-            }
             EditorCommand::Help => {
-                Help::render_help(&mut self.size);
+                Help::render_help(&mut self.size, self.theme.highlight, self.theme.text);
             }
-            EditorCommand::VimMode => {
-                let mut vim_mode = VimMode::new(
-                    self.cursor_position,
-                    self.screen_offset,
-                    self.size,
-                    &mut self.buffer,
-                );
-                continue_status = vim_mode.run(
-                    &mut self.cursor_position,
-                    &mut self.screen_offset,
-                    &mut self.size,
-                );
-            }
+
             EditorCommand::Quit => return false,
+            EditorCommand::Theme => {
+                self.theme.set_theme();
+            }
             _ => {}
         }
         self.needs_redraw = true;
@@ -308,15 +319,11 @@ impl View {
         self.cursor_position
             .down(1, self.buffer.len().saturating_sub(1));
         // if prev line starts with a tab -> this line starts with a tab
-        // TODO:
-        // get number of spaces that the prev line starts with
-        // floor divide by 4 -> new line starts with this many tabs
-        // up to some ceiling
         self.cursor_position.width = if self.buffer.is_tab(&Position {
             height: self.cursor_position.height,
             width: 4,
         }) {
-            4
+            self.buffer.num_tabs(self.cursor_position.height) * 4
         } else {
             0
         };
@@ -342,6 +349,7 @@ impl View {
         }
     }
 
+    #[inline]
     fn deletion(&mut self) {
         if self.buffer.is_empty() || self.cursor_position == ORIGIN_POSITION {
             return;
@@ -361,9 +369,6 @@ impl View {
                 _ => {
                     // get length of 1 line above
                     // this will be new width after join line operation
-                    // TODO:
-                    // figure out where to set the cursor
-                    // currently there is odd behavior when shifting the screen
                     let prev_line_width = self.buffer.text
                         [self.cursor_position.height.saturating_sub(1)]
                     .grapheme_len();
@@ -449,231 +454,4 @@ impl View {
             } //direction should only be left or right at this point
         };
     }
-
-    /*
-    fn handle_highlight(&mut self) {
-        //if buffer is empty -> nothing to highlight
-        if self.buffer.is_empty() {
-            return;
-        }
-        self.highlight.end = self.cursor_position;
-        let max_height = self.buffer.len().saturating_sub(1);
-        let previous_offset = self.screen_offset;
-
-        loop {
-            let Ok(read_event) = read() else { continue }; //skipping errors here
-            match HighlightCommand::try_from(read_event) {
-                Ok(event) => match event {
-                    HighlightCommand::Move(dir) => match dir {
-                        Direction::Right => {
-                            let max_width = self.buffer.text[self.highlight.end.height]
-                                .grapheme_len()
-                                .saturating_sub(1);
-                            let at_height = self.highlight.end.at_max_height(max_height);
-                            let at_width = self.highlight.end.at_max_width(max_width);
-                            match (at_height, at_width) {
-                                (true, false) => {
-                                    self.highlight.end.set_height(min(
-                                        self.highlight.end.height.saturating_add(1),
-                                        max_height,
-                                    ));
-                                    self.highlight.end.snap_left();
-                                }
-                                (false, false) => self.highlight.end.right(1, max_width),
-                                _ => {
-                                    // at last possible position
-                                }
-                            }
-                        }
-                        Direction::Left => {
-                            if self.highlight.end.at_left_edge() & !self.highlight.end.at_top() {
-                                self.highlight.end.up(1);
-                                self.highlight.end.set_width(
-                                    self.buffer.text[self.highlight.end.height]
-                                        .grapheme_len()
-                                        .saturating_sub(1),
-                                );
-                            } else {
-                                self.highlight.end.left(1);
-                            }
-                        }
-                        Direction::Down => {
-                            self.highlight.end.down(1, max_height);
-                            if self.highlight.end.at_max_height(max_height) {
-                                continue;
-                            }
-                            self.highlight.end.resolve_width(
-                                self.buffer.text[self.highlight.end.height]
-                                    .grapheme_len()
-                                    .saturating_sub(1),
-                            );
-                        }
-                        Direction::Up => {
-                            if self.highlight.end.height == 0 {
-                                continue;
-                            }
-                            self.highlight.end.up(1);
-                            self.highlight.end.set_width(min(
-                                self.highlight.end.width,
-                                self.buffer.text[self.highlight.end.height]
-                                    .grapheme_len()
-                                    .saturating_sub(1),
-                            ));
-                        }
-                        _ => continue,
-                    },
-                    HighlightCommand::Copy => {
-                        break;
-                    }
-                    HighlightCommand::Resize(size) => self.resize(size),
-                    HighlightCommand::RevertState => {
-                        self.screen_offset = previous_offset;
-                        self.highlight.clean_up();
-                        return;
-                    }
-                    HighlightCommand::Delete => {
-                        if self.cursor_position != self.highlight.end {
-                            self.batch_delete();
-                        }
-                        self.highlight.clean_up();
-                        return;
-                    }
-                    HighlightCommand::NoAction => continue,
-                },
-                Err(_) => continue,
-            }
-
-            self.highlight
-                .update_offset(&mut self.screen_offset, &self.size);
-            self.highlight.resolve_orientation(&self.cursor_position);
-            self.highlight.adjust_range(&self.cursor_position);
-            Terminal::hide_cursor().unwrap();
-            Terminal::clear_screen().unwrap();
-            self.render();
-
-            if self.cursor_position.height == self.highlight.end.height {
-                self.highlight.render_single_line(
-                    &self.cursor_position,
-                    &self.buffer,
-                    self.theme.highlight,
-                    self.theme.text,
-                );
-            } else {
-                self.highlight.multi_line_render(
-                    &self.cursor_position,
-                    &self.screen_offset,
-                    &self.size,
-                    &self.buffer,
-                    self.theme.highlight,
-                    self.theme.text,
-                );
-            }
-
-            Terminal::move_cursor_to(self.highlight.end.view_height(&self.screen_offset)).unwrap();
-            Terminal::show_cursor().unwrap();
-            Terminal::execute().unwrap();
-        }
-
-        let copy_string = self
-            .highlight
-            .generate_copy_str(&self.buffer, &self.cursor_position);
-
-        if !copy_string.is_empty() {
-            let res = self.copy_text_to_clipboard(copy_string);
-            debug_assert!(res.is_ok());
-        }
-        self.highlight.clean_up();
-    }
-    */
-
-    /*
-    #[inline]
-    fn copy_text_to_clipboard(&mut self, content: String) -> Result<(), Box<dyn Error>> {
-        ClipboardUtils::copy_text_to_clipboard(content)?;
-        Ok(())
-    }
-    */
-
-    /*
-    fn batch_delete(&mut self) {
-        self.highlight.resolve_orientation(&self.cursor_position);
-
-        if self.cursor_position.diff_height(&self.highlight.end) == 0 {
-            match self.highlight.or {
-                HighlightOrientation::StartFirst => self
-                    .buffer
-                    .delete_segment(&self.cursor_position, &mut self.highlight.end),
-                HighlightOrientation::EndFirst => self
-                    .buffer
-                    .delete_segment(&self.highlight.end, &mut self.cursor_position),
-            }
-        } else {
-            if self.cursor_position.diff_height(&self.highlight.end) > 1 {
-                let range_iter = match self.highlight.or {
-                    HighlightOrientation::StartFirst => {
-                        (self.cursor_position.height.saturating_add(1)..self.highlight.end.height)
-                            .rev()
-                    }
-                    HighlightOrientation::EndFirst => (self.highlight.end.height.saturating_add(1)
-                        ..self.cursor_position.height)
-                        .rev(),
-                };
-
-                for line in range_iter {
-                    self.buffer.pop_line(line);
-                }
-            }
-
-            //delete everything left of bottom position
-            //delete everything right of top position
-            //join the lines
-            match self.highlight.or {
-                HighlightOrientation::StartFirst => {
-                    self.highlight
-                        .end
-                        .set_height(self.cursor_position.height.saturating_add(1));
-                    self.buffer.delete_segment(
-                        &Position {
-                            width: 0,
-                            height: self.highlight.end.height,
-                        },
-                        &mut self.highlight.end,
-                    );
-                    self.buffer.delete_segment(
-                        &self.cursor_position,
-                        &mut Position {
-                            width: self.buffer.text[self.cursor_position.height]
-                                .len()
-                                .saturating_sub(1),
-                            height: self.cursor_position.height,
-                        },
-                    );
-                    self.buffer.join_line(self.highlight.end.height);
-                }
-                HighlightOrientation::EndFirst => {
-                    self.cursor_position
-                        .set_height(self.highlight.end.height.saturating_add(1));
-                    self.buffer.delete_segment(
-                        &self.cursor_position,
-                        &mut Position {
-                            width: self.buffer.text[self.highlight.end.height]
-                                .len()
-                                .saturating_sub(1),
-                            height: self.highlight.end.height,
-                        },
-                    );
-                    self.buffer.delete_segment(
-                        &Position {
-                            width: 0,
-                            height: self.cursor_position.height,
-                        },
-                        &mut self.cursor_position,
-                    );
-                    self.buffer.join_line(self.cursor_position.height);
-                    self.cursor_position.set_position(self.highlight.end);
-                }
-            }
-        }
-    }
-    */
 }

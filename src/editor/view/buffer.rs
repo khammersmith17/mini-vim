@@ -179,7 +179,7 @@ impl Buffer {
         self.is_saved = true;
     }
 
-    pub fn insert_tab(&mut self, pos: &Position) {
+    pub fn insert_tab(&mut self, pos: &Position, num_tabs: usize) {
         if self.is_empty() {
             let new_line = Line {
                 string: Vec::new(),
@@ -188,7 +188,7 @@ impl Buffer {
             self.text.push(new_line);
         }
 
-        for _ in pos.width..pos.width.saturating_add(4) {
+        for _ in pos.width..pos.width.saturating_add(num_tabs * 4) {
             self.text
                 .get_mut(pos.height)
                 .expect("Out of bounds")
@@ -287,6 +287,18 @@ impl Buffer {
         true
     }
 
+    pub fn num_tabs(&self, index: usize) -> usize {
+        let bytes = self.text[index].raw_string.as_bytes();
+        let len = bytes.len();
+        let mut i = 5;
+        while i < len && bytes[i] == 32 {
+            i += 1;
+        }
+
+        let i = i >> 2; //cheaper divide by 4 and get integer divide free
+        i
+    }
+
     pub fn new_line(&mut self, line_index: usize) {
         if self.is_empty() {
             self.text.push(Line {
@@ -306,10 +318,14 @@ impl Buffer {
             height: line_index,
             width: 4,
         }) {
-            self.insert_tab(&Position {
-                height: line_index.saturating_add(1),
-                width: 0,
-            });
+            let num_tabs = self.num_tabs(line_index);
+            self.insert_tab(
+                &Position {
+                    height: line_index.saturating_add(1),
+                    width: 0,
+                },
+                num_tabs,
+            );
         }
 
         self.is_saved = false;
@@ -580,5 +596,18 @@ mod tests {
                 width: 0
             }
         );
+    }
+
+    #[test]
+    fn num_tabs() {
+        let line1 = Line::from("              I have a bunch of text ");
+        let line2 = Line::from("This is a bunch more text");
+        let lines = vec![line1, line2];
+        let buff = Buffer {
+            text: lines,
+            filename: None,
+            is_saved: true,
+        };
+        assert_eq!(buff.num_tabs(0), 3);
     }
 }

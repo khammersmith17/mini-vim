@@ -4,8 +4,9 @@ use crate::editor::{
     terminal::{Coordinate, Position, ScreenOffset, Size, Terminal},
     view::{Buffer, Mode},
 };
-use crossterm::event::read;
+use crossterm::event::{read, Event};
 use crossterm::style::{Color, Print, PrintStyledContent, StyledContent, Stylize};
+use std::error::Error;
 use std::ops::{Range, RangeInclusive};
 
 /// type to identify the direction the highlight goes in
@@ -27,13 +28,13 @@ pub enum LineType {
 
 /// type to handle the highlighting and copy logic
 pub struct Highlight<'a> {
-    end: Position, // one copy owned here, the end of the highlight
+    end: Position, // one copy owned here, the end of the highlight owned by highlight
     offset: ScreenOffset,
     or: Orientation,
     line_range: RangeInclusive<usize>,
-    start: &'a mut Position, // one mutably borrowed, the view position
-    size: &'a mut Size,
-    buffer: &'a mut Buffer,
+    start: &'a mut Position, //one mutably borrowed, the view's position
+    size: &'a mut Size,      //owned by view
+    buffer: &'a mut Buffer,  //owned by view
 }
 
 impl Highlight<'_> {
@@ -45,7 +46,7 @@ impl Highlight<'_> {
     ) -> Highlight<'a> {
         Highlight {
             offset,
-            end: *end, // essentially making a copy
+            end: *end,
             or: Orientation::default(),
             line_range: 0..=0,
             start: end, // the immutable reference
@@ -53,13 +54,17 @@ impl Highlight<'_> {
             buffer,
         }
     }
-    pub fn run(&mut self, highlight: Color, text: Color) {
+
+    pub fn run<P>(&mut self, highlight: Color, text: Color, parser: P)
+    where
+        P: Fn(Event) -> Result<HighlightCommand, Box<dyn Error>>,
+    {
         self.status_line(); // to see status line before first event is read
         Terminal::move_cursor_to(self.end).unwrap();
         Terminal::execute().unwrap();
         loop {
             let Ok(read_event) = read() else { continue }; //skipping errors here
-            match HighlightCommand::try_from(read_event) {
+            match parser(read_event) {
                 Ok(event) => match event {
                     HighlightCommand::Move(dir) => dir.move_cursor(&mut self.end, &*self.buffer),
                     HighlightCommand::Copy => {
@@ -202,43 +207,6 @@ impl Highlight<'_> {
         copy_string
     }
 
-    pub fn render_highlight_line(
-        line: &str,
-        height: usize,
-        h_range: Range<usize>,
-        ctx: &LineType,
-        h_color: Color,
-        t_color: Color,
-    ) {
-        Terminal::move_cursor_to(Position { height, width: 0 }).unwrap();
-        Terminal::clear_line().unwrap();
-
-        let segment_to_highlight: String = line[h_range.clone()].to_owned();
-        let highlight_seg: StyledContent<String> =
-            segment_to_highlight.clone().with(t_color).on(h_color);
-
-        // order in which elements are rendered
-        // on the line based on line type
-        match ctx {
-            LineType::All => {
-                Terminal::queue_command(PrintStyledContent(highlight_seg)).unwrap();
-            }
-            LineType::Leading => {
-                Terminal::queue_command(PrintStyledContent(highlight_seg)).unwrap();
-                Terminal::queue_command(Print(&line[(h_range.end)..])).unwrap();
-            }
-            LineType::Trailing => {
-                Terminal::queue_command(Print(&line[..h_range.start])).unwrap();
-                Terminal::queue_command(PrintStyledContent(highlight_seg)).unwrap();
-            }
-            LineType::Middle => {
-                Terminal::queue_command(Print(&line[..h_range.start])).unwrap();
-                Terminal::queue_command(PrintStyledContent(highlight_seg)).unwrap();
-                Terminal::queue_command(Print(&line[h_range.end..])).unwrap();
-            }
-        }
-    }
-
     pub fn update_offset(&mut self) {
         // adding a method to handle the offset when
         // the end goes off screen of the highlight
@@ -295,7 +263,7 @@ impl Highlight<'_> {
             (false, false) => LineType::Middle,
         };
 
-        Self::render_highlight_line(
+        HighlightUtility::render_highlight_line(
             &*self.buffer.text[self.start.height].raw_string,
             self.start.height,
             h_r,
@@ -342,7 +310,7 @@ impl Highlight<'_> {
             // need to handle a partial line highlight
             if line_height == self.start.height {
                 match self.or {
-                    Orientation::StartFirst => Self::render_highlight_line(
+                    Orientation::StartFirst => HighlightUtility::render_highlight_line(
                         visible_line,
                         line_height.saturating_sub(self.offset.height),
                         self.start.width..visible_line.len(),
@@ -350,7 +318,7 @@ impl Highlight<'_> {
                         highlight_color,
                         text_color,
                     ),
-                    Orientation::EndFirst => Self::render_highlight_line(
+                    Orientation::EndFirst => HighlightUtility::render_highlight_line(
                         visible_line,
                         line_height.saturating_sub(self.offset.height),
                         0..self.start.width.saturating_add(1),
@@ -366,7 +334,7 @@ impl Highlight<'_> {
             // need to handle a partial line highlight
             if line_height == self.end.height {
                 match self.or {
-                    Orientation::StartFirst => Highlight::render_highlight_line(
+                    Orientation::StartFirst => HighlightUtility::render_highlight_line(
                         visible_line,
                         line_height.saturating_sub(self.offset.height),
                         0..self.end.width,
@@ -374,7 +342,7 @@ impl Highlight<'_> {
                         highlight_color,
                         text_color,
                     ),
-                    Orientation::EndFirst => Highlight::render_highlight_line(
+                    Orientation::EndFirst => HighlightUtility::render_highlight_line(
                         visible_line,
                         line_height.saturating_sub(self.offset.height),
                         self.end.width..visible_line.len(),
@@ -387,7 +355,7 @@ impl Highlight<'_> {
             }
 
             // if we get here, we are highlighting the whole line
-            Highlight::render_highlight_line(
+            HighlightUtility::render_highlight_line(
                 visible_line,
                 line_height.saturating_sub(self.offset.height),
                 0..visible_line.len(),
@@ -463,6 +431,47 @@ impl Highlight<'_> {
                     self.buffer.join_line(self.start.height);
                     self.start.set_position(self.end);
                 }
+            }
+        }
+    }
+}
+
+struct HighlightUtility;
+
+impl HighlightUtility {
+    pub fn render_highlight_line(
+        line: &str,
+        height: usize,
+        h_range: Range<usize>,
+        ctx: &LineType,
+        h_color: Color,
+        t_color: Color,
+    ) {
+        Terminal::move_cursor_to(Position { height, width: 0 }).unwrap();
+        Terminal::clear_line().unwrap();
+
+        let segment_to_highlight: String = line[h_range.clone()].to_owned();
+        let highlight_seg: StyledContent<String> =
+            segment_to_highlight.clone().with(t_color).on(h_color);
+
+        // order in which elements are rendered
+        // on the line based on line type
+        match ctx {
+            LineType::All => {
+                Terminal::queue_command(PrintStyledContent(highlight_seg)).unwrap();
+            }
+            LineType::Leading => {
+                Terminal::queue_command(PrintStyledContent(highlight_seg)).unwrap();
+                Terminal::queue_command(Print(&line[(h_range.end)..])).unwrap();
+            }
+            LineType::Trailing => {
+                Terminal::queue_command(Print(&line[..h_range.start])).unwrap();
+                Terminal::queue_command(PrintStyledContent(highlight_seg)).unwrap();
+            }
+            LineType::Middle => {
+                Terminal::queue_command(Print(&line[..h_range.start])).unwrap();
+                Terminal::queue_command(PrintStyledContent(highlight_seg)).unwrap();
+                Terminal::queue_command(Print(&line[h_range.end..])).unwrap();
             }
         }
     }
