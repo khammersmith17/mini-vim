@@ -93,42 +93,34 @@ impl Coordinate for Position {
         self.height = std::cmp::min(self.height.saturating_add(delta), max);
     }
 
-    #[inline]
     fn page_up(&mut self) {
         self.height = 0;
     }
 
-    #[inline]
     fn page_down(&mut self, max: usize) {
         self.height = max;
     }
 
-    #[inline]
     fn at_max_width(&self, max_width: usize) -> bool {
         self.width == max_width
     }
 
-    #[inline]
     fn at_max_height(&self, max_height: usize) -> bool {
         self.height == max_height
     }
 
-    #[inline]
     fn at_top(&self) -> bool {
         self.height == 0
     }
 
-    #[inline]
     fn at_left_edge(&self) -> bool {
         self.width == 0
     }
 
-    #[inline]
     fn snap_right(&mut self, new_width: usize) {
         self.width = new_width;
     }
 
-    #[inline]
     fn snap_left(&mut self) {
         self.width = 0;
     }
@@ -147,6 +139,7 @@ impl Position {
         self.set_width(new.width);
     }
 
+    #[inline]
     pub fn max_displacement_from_view(
         &self,
         offset: &ScreenOffset,
@@ -171,6 +164,7 @@ impl Position {
         std::cmp::max(height_displacement, width_displacement)
     }
 
+    #[inline(always)] //this is called on every render, very hot
     pub fn relative_view_position(&self, offset: &ScreenOffset) -> Position {
         Position {
             height: self.height.saturating_sub(offset.height),
@@ -305,72 +299,58 @@ impl ScreenOffset {
 
 // inlining all methods here as they are straight forward computations
 impl Coordinate for ScreenOffset {
-    #[inline]
     fn set_width(&mut self, val: usize) {
         self.width = val;
     }
 
-    #[inline]
     fn set_height(&mut self, val: usize) {
         self.height = val;
     }
 
-    #[inline]
     fn left(&mut self, delta: usize) {
         self.width = self.width.saturating_sub(delta);
     }
 
-    #[inline]
     fn up(&mut self, delta: usize) {
         self.height = self.height.saturating_sub(delta);
     }
 
-    #[inline]
     fn right(&mut self, delta: usize, max: usize) {
         self.width = std::cmp::min(self.width.saturating_add(delta), max);
     }
 
-    #[inline]
     fn down(&mut self, delta: usize, max: usize) {
         self.height = std::cmp::min(self.height.saturating_add(delta), max);
     }
 
-    #[inline]
     fn page_up(&mut self) {
         self.height = 0;
     }
 
-    #[inline]
     fn page_down(&mut self, max: usize) {
         self.height = max;
     }
 
-    #[inline]
     fn at_max_width(&self, max_width: usize) -> bool {
         self.width == max_width
     }
 
-    #[inline]
     fn at_max_height(&self, max_height: usize) -> bool {
         self.height == max_height
     }
 
-    #[inline]
     fn at_top(&self) -> bool {
         self.height == 0
     }
 
-    #[inline]
     fn at_left_edge(&self) -> bool {
         self.width == 0
     }
 
-    #[inline]
     fn snap_right(&mut self, new_width: usize) {
         self.width = new_width;
     }
 
-    #[inline]
     fn snap_left(&mut self) {
         self.width = 0;
     }

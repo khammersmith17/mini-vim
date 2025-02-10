@@ -1,8 +1,7 @@
 use super::line::{GraphemeWidth, Line, TextFragment};
 use crate::editor::view::{Coordinate, Position};
 use std::fs::{read_to_string, OpenOptions};
-use std::io::prelude::*;
-use std::io::{Error, LineWriter};
+use std::io::{Error, LineWriter, Write};
 
 #[derive(Default, Clone)]
 pub struct Buffer {

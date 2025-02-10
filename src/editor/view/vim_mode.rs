@@ -12,11 +12,13 @@ use crate::editor::{
 };
 use crossterm::event::{read, Event, KeyCode, KeyEvent};
 use crossterm::style::Color;
+use std::error::Error;
 
 enum ContinueState {
     ExitSession,
     ContinueVim,
     ContinueVimPersistError,
+    InvalidCommand,
 }
 
 pub struct VimMode<'a> {
@@ -31,7 +33,7 @@ impl VimMode<'_> {
         cursor_position: Position,
         screen_offset: ScreenOffset,
         size: Size,
-        buffer: &'a mut Buffer,
+        buffer: &'a mut Buffer, // mutable reference to buffer
     ) -> VimMode<'a> {
         VimMode {
             cursor_position,
@@ -48,14 +50,15 @@ impl VimMode<'_> {
         h_color: Color,
         t_color: Color,
     ) -> bool {
-        self.status_line();
-        Terminal::move_cursor_to(
-            self.cursor_position
-                .relative_view_position(&self.screen_offset),
-        )
-        .unwrap();
-        Terminal::execute().unwrap();
+        // TODO:
+        // only rerender when the lines on the view changes
+        // ie when screen offset shifts at all
+        // then re render
+        // otherwise just move the cursor to the new position
+        let res = self.start();
+        debug_assert!(res.is_ok());
         loop {
+            let mut needs_render = false;
             let Ok(read_event) = read() else { continue }; //skipping an error on read cursor action
 
             match VimModeCommands::try_from(read_event) {
@@ -67,7 +70,9 @@ impl VimMode<'_> {
                         | Direction::Down
                         | Direction::End
                         | Direction::Home => {
-                            self.move_cursor(dir);
+                            if self.move_cursor(dir) > 0 {
+                                needs_render = true;
+                            }
                         }
                         _ => continue,
                     },
@@ -86,15 +91,12 @@ impl VimMode<'_> {
                         match self.determine_queue_command(queue_command) {
                             ContinueState::ContinueVimPersistError => continue,
                             ContinueState::ContinueVim => {} // no action
+                            ContinueState::InvalidCommand => {
+                                // if the command is invalid, render the help
+                                VimHelpScreen::render_help(&mut self.size, h_color, t_color)
+                            }
                             ContinueState::ExitSession => return false,
                         }
-                        /*
-                                                if !self.determine_queue_command(queue_command) {
-                                                    return false;
-                                                } else {
-                                                    continue;
-                                                }
-                        */
                     }
                     VimModeCommands::Highlight => {
                         let mut highlight = Highlight::new(
@@ -104,9 +106,14 @@ impl VimMode<'_> {
                             &mut self.buffer,
                         );
                         highlight.run(h_color, t_color, parse_highlight_vim_mode);
-                        self.resolve_displacement() // making sure the offset is correct on a delete
+                        if self.resolve_displacement() > 0 {
+                            needs_render = true;
+                        } // making sure the offset is correct on a delete
                     }
-                    VimModeCommands::Resize(new_size) => self.resize(new_size),
+                    VimModeCommands::Resize(new_size) => {
+                        self.resize(new_size);
+                        needs_render = true;
+                    }
                     VimModeCommands::Exit => {
                         // here user is staying in terminal session
                         // but exiting vim mode
@@ -120,32 +127,52 @@ impl VimMode<'_> {
                 },
                 Err(_) => continue, //ignoring error
             }
-
-            Terminal::hide_cursor().unwrap();
-            Terminal::move_cursor_to(self.screen_offset.to_position()).unwrap();
-            Terminal::clear_screen().unwrap();
-            self.render();
-            self.status_line();
-            Terminal::move_cursor_to(
+            if needs_render {
+                let res = self.render_proc();
+                debug_assert!(res.is_ok());
+            }
+            let res = Terminal::move_cursor_to(
                 self.cursor_position
                     .relative_view_position(&self.screen_offset),
-            )
-            .unwrap();
-            Terminal::show_cursor().unwrap();
-            Terminal::execute().unwrap();
+            );
+            debug_assert!(res.is_ok());
+
+            let res = Terminal::execute();
+            debug_assert!(res.is_ok());
         }
     }
 
+    fn start(&self) -> Result<(), Box<dyn Error>> {
+        self.status_line()?;
+        Terminal::move_cursor_to(
+            self.cursor_position
+                .relative_view_position(&self.screen_offset),
+        )?;
+        Terminal::execute()?;
+        Ok(())
+    }
+
+    #[inline]
+    fn render_proc(&self) -> Result<(), Box<dyn Error>> {
+        Terminal::hide_cursor()?;
+        Terminal::move_cursor_to(self.screen_offset.to_position())?;
+        Terminal::clear_screen()?;
+        self.render()?;
+        self.status_line()?;
+
+        Terminal::show_cursor()?;
+        Ok(())
+    }
+
     fn add_to_clipboard(&mut self) {
-        let paste_text = ClipboardUtils::get_text_from_clipboard();
-        if paste_text.is_ok() {
+        if let Ok(paste_text) = ClipboardUtils::get_text_from_clipboard() {
             self.buffer
-                .add_text_from_clipboard(&paste_text.unwrap(), &mut self.cursor_position);
+                .add_text_from_clipboard(&paste_text, &mut self.cursor_position);
         }
     }
 
     #[inline]
-    fn status_line(&self) {
+    fn status_line(&self) -> Result<(), Box<dyn Error>> {
         Terminal::render_status_line(
             Mode::VimMode,
             self.buffer.is_saved,
@@ -155,8 +182,8 @@ impl VimMode<'_> {
                 self.cursor_position.height.saturating_add(1),
                 self.buffer.len(),
             )),
-        )
-        .unwrap();
+        )?;
+        Ok(())
     }
 
     fn resize(&mut self, new_size: Size) {
@@ -171,11 +198,7 @@ impl VimMode<'_> {
         }
     }
 
-    fn render(&self) {
-        if (self.size.width == 0) | (self.size.height == 0) {
-            return;
-        }
-
+    fn render(&self) -> Result<(), Box<dyn Error>> {
         #[allow(clippy::integer_division)]
         for current_row in self.screen_offset.height
             ..self
@@ -193,30 +216,31 @@ impl VimMode<'_> {
                         self.screen_offset.width
                             ..self.screen_offset.width.saturating_add(self.size.width),
                     ),
-                )
-                .unwrap();
+                )?;
             } else if self.buffer.is_empty() && (current_row == self.size.height / 3) {
                 Terminal::render_line(
                     relative_row,
                     Terminal::get_welcome_message(&self.size, &self.screen_offset),
-                )
-                .unwrap();
+                )?;
             } else {
-                Terminal::render_line(relative_row, "~").unwrap();
+                Terminal::render_line(relative_row, "~")?;
             }
         }
+        Ok(())
     }
 
-    fn move_cursor(&mut self, dir: Direction) {
+    // handing back view delta
+    fn move_cursor(&mut self, dir: Direction) -> usize {
         if self.buffer.is_empty() {
             self.cursor_position.snap_left();
             self.cursor_position.page_up();
+            0
         } else {
-            self.move_and_resolve(dir);
+            self.move_and_resolve(dir)
         }
     }
 
-    fn resolve_displacement(&mut self) {
+    fn resolve_displacement(&mut self) -> usize {
         let dis =
             self.cursor_position
                 .max_displacement_from_view(&self.screen_offset, &self.size, 2);
@@ -231,6 +255,7 @@ impl VimMode<'_> {
                 self.buffer.len(),
             );
         }
+        dis
     }
 
     #[inline]
@@ -240,15 +265,22 @@ impl VimMode<'_> {
         match command {
             QueueInitCommand::Colon => self.queue_colon(),
             QueueInitCommand::PageUp => {
-                self.queue_page_up();
+                let valid = self.queue_page_up();
                 // stay in vim mode
-                return ContinueState::ContinueVim;
+                if valid {
+                    ContinueState::ContinueVim
+                } else {
+                    ContinueState::InvalidCommand
+                }
             }
             QueueInitCommand::PageDown => {
-                self.queue_page_down();
+                let valid = self.queue_page_down();
                 // stay in vim mode
-
-                return ContinueState::ContinueVim;
+                if valid {
+                    ContinueState::ContinueVim
+                } else {
+                    ContinueState::InvalidCommand
+                }
             }
         }
     }
@@ -290,8 +322,10 @@ impl VimMode<'_> {
     }
 
     fn command_status_line(&self, message: &str) {
-        Terminal::render_line(self.size.height.saturating_sub(2), format!(":{message}")).unwrap();
-        Terminal::execute().unwrap();
+        let render =
+            Terminal::render_line(self.size.height.saturating_sub(2), format!(":{message}"));
+        let flush = Terminal::execute();
+        debug_assert!(render.is_ok() & flush.is_ok());
     }
 
     fn eval_colon_queue(&mut self, queue: Vec<ColonQueueActions>) -> ContinueState {
@@ -345,34 +379,42 @@ impl VimMode<'_> {
         Ok(res)
     }
 
-    fn queue_page_up(&mut self) {
+    fn queue_page_up(&mut self) -> bool {
+        // bool propogates up an invalid complex command
         let event = Self::wait_for_successful_event();
         if let Event::Key(KeyEvent { code, .. }) = event {
-            match code {
-                KeyCode::Char('g') => {
-                    self.move_and_resolve(Direction::PageUp);
-                }
-                _ => {}
+            if matches!(code, KeyCode::Char('g')) {
+                //only handling if gg, otherwise skip
+                self.move_and_resolve(Direction::PageUp);
+                true
+            } else {
+                false
             }
+        } else {
+            false
         }
     }
 
-    fn queue_page_down(&mut self) {
+    fn queue_page_down(&mut self) -> bool {
+        // bool propogates up an invalid complex command
         let event = Self::wait_for_successful_event();
         if let Event::Key(KeyEvent { code, .. }) = event {
-            match code {
-                KeyCode::Char('G') => {
-                    self.move_and_resolve(Direction::PageDown);
-                }
-                _ => {}
+            if matches!(code, KeyCode::Char('G')) {
+                // only handling if GG otherwise skip
+                self.move_and_resolve(Direction::PageDown);
+                true
+            } else {
+                false
             }
+        } else {
+            false
         }
     }
 
     #[inline]
-    fn move_and_resolve(&mut self, dir: Direction) {
+    fn move_and_resolve(&mut self, dir: Direction) -> usize {
         dir.move_cursor(&mut self.cursor_position, &*self.buffer);
-        self.resolve_displacement();
+        self.resolve_displacement()
     }
 
     #[inline]

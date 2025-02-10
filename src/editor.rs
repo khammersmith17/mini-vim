@@ -1,8 +1,8 @@
 use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{read, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-mod terminal;
+pub mod terminal;
 use std::env::args;
-use std::io::Error;
+use std::io::{Error, ErrorKind};
 use std::panic::{set_hook, take_hook};
 use std::{thread, time::Duration};
 use terminal::Terminal;
@@ -13,9 +13,23 @@ use editorcommands::EditorCommand;
 
 #[derive(Default)]
 pub struct Editor {
-    should_quit: bool,
     view: View,
+    should_quit: bool,
 }
+
+//TODO:
+//rework render logic
+//need the ability to paritially render or not render at all
+//without storing a flag for it in the class
+//
+//
+//current main loop
+//wait for next event
+//read it in
+//get the command
+//evaluate it for action
+//get the render status back from the view
+//evaluate for rendering
 
 impl Editor {
     pub fn new() -> Result<Self, Error> {
@@ -28,7 +42,12 @@ impl Editor {
         let args: Vec<String> = args().collect();
         let mut view = View::default();
         if let Some(filename) = args.get(1) {
-            view.load(filename);
+            if !view.load(filename).is_ok() {
+                return Err(Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("{filename} is a directory"),
+                ));
+            };
         }
         Ok(Self {
             should_quit: false,
@@ -38,13 +57,17 @@ impl Editor {
 
     pub fn run(&mut self) -> Result<(), Error> {
         loop {
-            self.refresh_screen()?;
+            let refresh = self.refresh_screen();
+            if !refresh.is_ok() {
+                continue; // refresh again if there is an error state
+            }
             if self.should_quit {
                 break;
             }
             match read() {
                 Ok(event) => {
-                    self.evaluate_event(event);
+                    let _ = self.evaluate_event(event);
+                    //silencing errors here, users will just see nothing happen
                 }
                 Err(err) => {
                     #[cfg(debug_assertions)]
@@ -57,7 +80,7 @@ impl Editor {
         Ok(())
     }
     #[allow(clippy::needless_pass_by_value)]
-    fn evaluate_event(&mut self, event: Event) {
+    fn evaluate_event(&mut self, event: Event) -> Result<(), Error> {
         let should_process = match &event {
             Event::Key(KeyEvent { kind, .. }) => kind == &KeyEventKind::Press,
             Event::Resize(_, _) => true,
@@ -69,11 +92,11 @@ impl Editor {
                 Ok(command) => {
                     if matches!(command, EditorCommand::Quit) {
                         if !self.view.buffer.is_saved && !self.view.buffer.is_empty() {
-                            let exit = Self::exit_without_saving();
+                            let exit = Self::exit_without_saving()?;
                             if exit {
-                                Terminal::clear_screen().unwrap();
-                                Terminal::render_line(0, "Exiting without saving...").unwrap();
-                                Terminal::execute().unwrap();
+                                Terminal::clear_screen()?;
+                                Terminal::render_line(0, "Exiting without saving...")?;
+                                Terminal::execute()?;
                                 thread::sleep(Duration::from_millis(300));
                             } else {
                                 if self.view.buffer.filename.is_none() {
@@ -88,9 +111,8 @@ impl Editor {
                     } else {
                         // process the event
                         // handle is any downtream commands quit the session
-                        let should_continue: bool = self.view.handle_event(command);
-                        if !should_continue {
-                            self.should_quit = true;
+                        if let Ok(should_continue) = self.view.handle_event(command) {
+                            self.should_quit = !should_continue;
                         }
                     }
                 }
@@ -107,14 +129,15 @@ impl Editor {
                 panic!("Unsupported event")
             }
         }
+        Ok(())
     }
 
-    fn exit_without_saving() -> bool {
-        Terminal::clear_screen().unwrap();
-        Terminal::hide_cursor().unwrap();
-        Terminal::render_line(0, "Leave without saving:").unwrap();
-        Terminal::render_line(1, "Ctrl-y = exit | Ctrl-n = save").unwrap();
-        Terminal::execute().unwrap();
+    fn exit_without_saving() -> Result<bool, Error> {
+        Terminal::clear_screen()?;
+        Terminal::hide_cursor()?;
+        Terminal::render_line(0, "Leave without saving:")?;
+        Terminal::render_line(1, "Ctrl-y = exit | Ctrl-n = save")?;
+        Terminal::execute()?;
         loop {
             match read() {
                 Ok(event) => {
@@ -124,10 +147,10 @@ impl Editor {
                     {
                         match (code, modifiers) {
                             (KeyCode::Char('y'), KeyModifiers::CONTROL) => {
-                                return true;
+                                return Ok(true);
                             }
                             (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
-                                return false;
+                                return Ok(false);
                             }
                             _ => {
                                 // not reading other key presses
@@ -154,7 +177,7 @@ impl Editor {
         if self.should_quit {
             Terminal::print("Goodbye.\r\n")?;
         } else if self.view.needs_redraw {
-            self.view.render();
+            let _ = self.view.render(true);
         }
         Terminal::move_cursor_to(
             self.view

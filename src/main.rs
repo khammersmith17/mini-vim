@@ -7,8 +7,22 @@
     clippy::integer_division
 )]
 mod editor;
+use editor::terminal::Terminal;
 use editor::Editor;
 
 fn main() {
-    let _ = Editor::new().unwrap().run();
+    let loader = Editor::new();
+    match loader {
+        Ok(mut editor) => match editor.run() {
+            Ok(_) => {}
+            Err(e) => {
+                let _ = Terminal::terminate();
+                println!("MiniVim Error:\n{}", e);
+            }
+        },
+        Err(e) => {
+            let _ = Terminal::terminate();
+            println!("MiniVim Error:\n{}", e);
+        }
+    }
 }

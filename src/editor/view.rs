@@ -3,6 +3,7 @@ use super::editorcommands::{
 };
 use super::terminal::{Coordinate, Mode, Position, ScreenOffset, Size, Terminal};
 use crossterm::event::read;
+use std::{error::Error, path::Path};
 pub mod buffer;
 use buffer::Buffer;
 pub mod line;
@@ -19,6 +20,20 @@ use vim_mode::VimMode;
 mod clipboard_interface;
 use clipboard_interface::ClipboardUtils;
 
+//TODO:
+//add in a feature where we keep track of the max width of the cursor
+//when we go left, we decrement
+//if the line we move to up or down is not as long, go to the max
+//if the line we move to is as long or longer, go to max width
+//when we move right max width++
+//when we go left max width--
+//ALSO
+//when a line changes
+//only rerender that line
+//when there is a new line and the buffer goes beyond the offset, render
+//the lines below
+//if there is just a char entered, rerender just that line
+
 pub const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
 pub const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -32,7 +47,7 @@ pub struct View {
     pub size: Size,
     pub cursor_position: Position,
     pub screen_offset: ScreenOffset,
-    theme: Theme,
+    pub theme: Theme,
     pub needs_redraw: bool,
     pub buffer: Buffer,
 }
@@ -51,13 +66,16 @@ impl Default for View {
 }
 
 impl View {
-    pub fn render(&mut self) {
-        if (self.size.width == 0) | (self.size.height == 0) {
-            return;
-        }
-
+    pub fn render(&mut self, full_screen: bool) -> Result<(), Box<dyn Error>> {
+        // if offset == height then this will be the same
+        let start = if full_screen {
+            self.screen_offset.height
+        } else {
+            // this will prevent underflow if height = 0
+            self.cursor_position.height.saturating_sub(1)
+        };
         #[allow(clippy::integer_division)]
-        for current_row in self.screen_offset.height
+        for current_row in start
             ..self
                 .screen_offset
                 .height
@@ -93,10 +111,30 @@ impl View {
                 self.cursor_position.height.saturating_add(1),
                 self.buffer.len(),
             )),
-        )
-        .unwrap();
+        )?;
 
         self.needs_redraw = false;
+        Ok(())
+    }
+
+    #[inline(always)] // this should be very hot
+    fn evaluate_view_state_change(&mut self) {
+        let view_delta = self.check_offset();
+        if view_delta == 0 {
+            // delete and render only the current line
+            Self::render_line(
+                self.cursor_position
+                    .height
+                    .saturating_sub(self.screen_offset.height),
+                self.buffer.text[self.cursor_position.height].get_line_subset(
+                    self.screen_offset.width
+                        ..self.screen_offset.width.saturating_add(self.size.width),
+                ),
+            )
+        } else {
+            let res = self.render(true);
+            debug_assert!(res.is_ok());
+        }
     }
 
     #[inline]
@@ -115,13 +153,19 @@ impl View {
         );
     }
 
-    pub fn load(&mut self, filename: &str) {
+    pub fn load(&mut self, filename: &str) -> Result<(), Box<dyn Error>> {
+        let path = Path::new(filename);
+        if path.is_dir() {
+            return Err(format!("{filename} is a directory").into());
+        }
         if let Ok(buffer) = Buffer::load(filename) {
             self.buffer = buffer;
             self.needs_redraw = true;
         } else {
             self.buffer = Buffer::load_named_empty(filename);
         }
+
+        Ok(())
     }
 
     // inlining because it is a rather straight forward computation
@@ -203,42 +247,73 @@ impl View {
         Terminal::execute().unwrap();
     }
 
-    pub fn handle_event(&mut self, command: EditorCommand) -> bool {
-        //match the event to the enum value and handle the event accrodingly
+    pub fn handle_event(&mut self, command: EditorCommand) -> Result<bool, Box<dyn Error>> {
+        //match the event to the enum value and handle the event accordingly
         //return true to continue false to quit
         //so we can propogate up quit from vim mode
         //ordered these in what I think will be how often they are used
+        //TODO:
+        //figure out some logic for when we need to render the whole screen,
+        //a subset of the screen
+        //or a single line
         let mut continue_status: bool = true;
         match command {
             EditorCommand::Move(direction) => {
+                // if offset changes, render the entire screen
                 self.move_cursor(direction);
-                self.check_offset();
+                let view_delta = self.check_offset();
+                if view_delta == 0 {
+                    Terminal::move_cursor_to(
+                        self.cursor_position
+                            .relative_view_position(&self.screen_offset),
+                    )?;
+                    Terminal::render_status_line(
+                        Mode::Insert,
+                        self.buffer.is_saved,
+                        &self.size,
+                        self.buffer.filename.as_deref(),
+                        Some((
+                            self.cursor_position.height.saturating_add(1),
+                            self.buffer.len(),
+                        )),
+                    )?
+                } else {
+                    self.render(true)?;
+                }
             }
             EditorCommand::Insert(char) => {
                 self.insert_char(char);
-                self.check_offset();
+                self.evaluate_view_state_change();
             }
-            EditorCommand::Delete => self.deletion(),
-            EditorCommand::Tab => self.insert_tab(),
+            EditorCommand::Delete => {
+                self.deletion();
+            }
+            EditorCommand::Tab => {
+                self.insert_tab();
+                self.evaluate_view_state_change();
+            }
             EditorCommand::NewLine => {
                 self.new_line();
-                self.check_offset(); //may need to snap back
             }
             EditorCommand::JumpWord(direction) => self.jump_word(direction),
             EditorCommand::Save => {
+                // no need to render here
                 if self.buffer.filename.is_none() {
                     self.get_file_name();
                 }
                 self.buffer.save();
             }
             EditorCommand::Resize(size) => {
+                // render always
                 self.resize(size);
                 self.check_offset(); // cursor may no longer be on screen
+                self.render(true)?;
             }
 
             EditorCommand::Paste => {
+                // render always
                 let Ok(paste_text) = ClipboardUtils::get_text_from_clipboard() else {
-                    return true;
+                    return Ok(true); // handling an error here
                 };
                 self.buffer
                     .add_text_from_clipboard(&paste_text, &mut self.cursor_position);
@@ -270,7 +345,7 @@ impl View {
                     self.theme.text,
                     parse_highlight_normal_mode,
                 );
-                self.check_offset() // making sure the offset is correct on a delete
+                self.check_offset(); // making sure the offset is correct on a delete
             }
             EditorCommand::Search => {
                 let mut search = Search::new(
@@ -286,19 +361,25 @@ impl View {
                     &self.buffer,
                 );
             }
-            EditorCommand::JumpLine => self.jump_cursor(),
+            EditorCommand::JumpLine => {
+                self.jump_cursor()?
+                // check to see if offset changes
+                // if so render the entire screen
+                // otherwise only move cursor
+            }
             EditorCommand::Help => {
                 Help::render_help(&mut self.size, self.theme.highlight, self.theme.text);
             }
 
-            EditorCommand::Quit => return false,
+            EditorCommand::Quit => continue_status = false,
             EditorCommand::Theme => {
                 self.theme.set_theme();
             }
             _ => {}
         }
+        Terminal::execute()?;
         self.needs_redraw = true;
-        continue_status
+        Ok(continue_status)
     }
 
     fn new_line(&mut self) {
@@ -327,19 +408,31 @@ impl View {
         } else {
             0
         };
-        self.check_offset();
+        // handling if the new line is currently off screen
+        let view_delta = self.check_offset();
+        if view_delta > 1 {
+            let res = self.render(true);
+            debug_assert!(res.is_ok());
+        }
+
+        // if the end of the buffer is on the screen
+        // here we have screen space to add the new line
+        if self.screen_offset.height.saturating_add(self.size.height) > self.buffer.len() {
+            let res = self.render(false);
+            debug_assert!(res.is_ok());
+        }
     }
 
     #[inline]
-    fn check_offset(&mut self) {
-        match self
-            .cursor_position
-            .max_displacement_from_view(&self.screen_offset, &self.size, 1)
-        {
+    fn check_offset(&mut self) -> usize {
+        let view_delta =
+            self.cursor_position
+                .max_displacement_from_view(&self.screen_offset, &self.size, 2);
+        match view_delta {
             0 => (),
             1 => self
                 .screen_offset
-                .update_offset_single_move(&self.cursor_position, &self.size, 1),
+                .update_offset_single_move(&self.cursor_position, &self.size, 2),
             _ => self.screen_offset.handle_offset_screen_snap(
                 &self.cursor_position,
                 &self.size,
@@ -347,6 +440,7 @@ impl View {
                 self.buffer.len(),
             ),
         }
+        view_delta
     }
 
     #[inline]
@@ -381,10 +475,14 @@ impl View {
                 self.delete_char();
             }
         };
-        self.check_offset();
+
+        // evaluate how much of the screen we need to render
+        let view_delta = self.check_offset();
+        let res = self.render(if view_delta > 0 { true } else { false });
+        debug_assert!(res.is_ok());
     }
 
-    fn jump_cursor(&mut self) {
+    fn jump_cursor(&mut self) -> Result<(), Box<dyn Error>> {
         let neg_2 = self.size.height.saturating_sub(2);
         let render_string: String = "Jump to: ".into();
         let mut line = 0_usize;
@@ -424,9 +522,9 @@ impl View {
                                 self.buffer.len(),
                             );
                         }
-                        return;
+                        return Ok(());
                     }
-                    JumpCommand::Exit => return,
+                    JumpCommand::Exit => return Ok(()),
                     JumpCommand::NoAction => continue,
                 },
                 Err(_) => continue,
@@ -434,13 +532,13 @@ impl View {
 
             match line {
                 0 => {
-                    let _ = Terminal::render_line(neg_2, &render_string);
+                    Terminal::render_line(neg_2, &render_string)?;
                 }
                 _ => {
-                    let _ = Terminal::render_line(neg_2, &format!("{render_string}{line}"));
+                    Terminal::render_line(neg_2, &format!("{render_string}{line}"))?;
                 }
             }
-            let _ = Terminal::execute();
+            Terminal::execute()?;
         }
     }
 
