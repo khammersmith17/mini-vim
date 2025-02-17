@@ -19,6 +19,7 @@ enum ContinueState {
     ContinueVim,
     ContinueVimPersistError,
     InvalidCommand,
+    JumpCursor(usize),
 }
 
 pub struct VimMode<'a> {
@@ -50,11 +51,6 @@ impl VimMode<'_> {
         h_color: Color,
         t_color: Color,
     ) -> bool {
-        // TODO:
-        // only rerender when the lines on the view changes
-        // ie when screen offset shifts at all
-        // then re render
-        // otherwise just move the cursor to the new position
         let res = self.start();
         debug_assert!(res.is_ok());
         loop {
@@ -76,6 +72,21 @@ impl VimMode<'_> {
                         }
                         _ => continue,
                     },
+                    VimModeCommands::JumpUp => {
+                        if self.jump_up() > 0 {
+                            needs_render = true;
+                        }
+                    }
+                    VimModeCommands::JumpDown => {
+                        if self.jump_down() > 0 {
+                            needs_render = true;
+                        }
+                    }
+                    VimModeCommands::NewLine => {
+                        // new line
+                        self.buffer.add_new_line(&mut self.cursor_position);
+                        needs_render = true;
+                    }
                     VimModeCommands::StartOfNextWord => {
                         self.buffer.begining_of_next_word(&mut self.cursor_position)
                     }
@@ -90,10 +101,17 @@ impl VimMode<'_> {
                         // else user is exiting the session
                         match self.determine_queue_command(queue_command) {
                             ContinueState::ContinueVimPersistError => continue,
-                            ContinueState::ContinueVim => {} // no action
+                            ContinueState::ContinueVim => {
+                                needs_render = true;
+                            } // no action
                             ContinueState::InvalidCommand => {
                                 // if the command is invalid, render the help
                                 VimHelpScreen::render_help(&mut self.size, h_color, t_color)
+                            }
+                            ContinueState::JumpCursor(line) => {
+                                if self.jump_cursor_to(line) > 0 {
+                                    needs_render = true;
+                                }
                             }
                             ContinueState::ExitSession => return false,
                         }
@@ -120,9 +138,13 @@ impl VimMode<'_> {
                         self.hand_back_state(cursor_position, screen_offset, size);
                         return true;
                     }
-                    VimModeCommands::Paste => self.add_to_clipboard(),
+                    VimModeCommands::Paste => {
+                        self.add_from_clipboard();
+                        needs_render = true;
+                    }
                     VimModeCommands::NoAction => {
-                        VimHelpScreen::render_help(&mut self.size, h_color, t_color)
+                        VimHelpScreen::render_help(&mut self.size, h_color, t_color);
+                        needs_render = true;
                     } // skipping other
                 },
                 Err(_) => continue, //ignoring error
@@ -131,15 +153,41 @@ impl VimMode<'_> {
                 let res = self.render_proc();
                 debug_assert!(res.is_ok());
             }
-            let res = Terminal::move_cursor_to(
-                self.cursor_position
-                    .relative_view_position(&self.screen_offset),
-            );
-            debug_assert!(res.is_ok());
 
-            let res = Terminal::execute();
+            let res = self.cursor_and_status();
             debug_assert!(res.is_ok());
         }
+    }
+
+    fn jump_cursor_to(&mut self, line: usize) -> usize {
+        self.cursor_position.height = std::cmp::min(line, self.buffer.len().saturating_sub(1));
+        self.resolve_displacement()
+    }
+
+    fn jump_down(&mut self) -> usize {
+        self.cursor_position.height = std::cmp::min(
+            self.cursor_position.height.saturating_add(10),
+            self.buffer.len().saturating_sub(1),
+        );
+        self.resolve_displacement()
+    }
+
+    fn jump_up(&mut self) -> usize {
+        self.cursor_position.height = self.cursor_position.height.saturating_sub(10);
+        self.resolve_displacement()
+    }
+
+    #[inline]
+    fn cursor_and_status(&self) -> Result<(), Box<dyn Error>> {
+        self.status_line()?;
+        Terminal::move_cursor_to(
+            self.cursor_position
+                .relative_view_position(&self.screen_offset),
+        )?;
+
+        Terminal::show_cursor()?;
+        Terminal::execute()?;
+        Ok(())
     }
 
     fn start(&self) -> Result<(), Box<dyn Error>> {
@@ -158,13 +206,11 @@ impl VimMode<'_> {
         Terminal::move_cursor_to(self.screen_offset.to_position())?;
         Terminal::clear_screen()?;
         self.render()?;
-        self.status_line()?;
 
-        Terminal::show_cursor()?;
         Ok(())
     }
 
-    fn add_to_clipboard(&mut self) {
+    fn add_from_clipboard(&mut self) {
         if let Ok(paste_text) = ClipboardUtils::get_text_from_clipboard() {
             self.buffer
                 .add_text_from_clipboard(&paste_text, &mut self.cursor_position);
@@ -230,6 +276,7 @@ impl VimMode<'_> {
     }
 
     // handing back view delta
+    #[inline(always)]
     fn move_cursor(&mut self, dir: Direction) -> usize {
         if self.buffer.is_empty() {
             self.cursor_position.snap_left();
@@ -277,6 +324,22 @@ impl VimMode<'_> {
                 let valid = self.queue_page_down();
                 // stay in vim mode
                 if valid {
+                    ContinueState::ContinueVim
+                } else {
+                    ContinueState::InvalidCommand
+                }
+            }
+            QueueInitCommand::Delete => {
+                // delete the block associated with the next key press
+                if self.queue_delete() {
+                    ContinueState::ContinueVim
+                } else {
+                    ContinueState::InvalidCommand
+                }
+            }
+            QueueInitCommand::Yank => {
+                // copy the block associated with the next key press
+                if self.queue_yank() {
                     ContinueState::ContinueVim
                 } else {
                     ContinueState::InvalidCommand
@@ -349,6 +412,12 @@ impl VimMode<'_> {
                     self.command_status_line("Invalid command");
                     return ContinueState::ContinueVimPersistError;
                 }
+                ColonQueueActions::Jump(line) => {
+                    // jump to the line
+                    // continue state is continue vim
+                    // figure out where to do the rendering if the cursor moves off screen
+                    return ContinueState::JumpCursor(line);
+                }
             },
             2 => {
                 match queue.as_slice() {
@@ -370,6 +439,9 @@ impl VimMode<'_> {
     }
 
     fn map_string_to_queue_vec(string_queue: &str) -> Result<Vec<ColonQueueActions>, String> {
+        if let Ok(line) = string_queue.parse::<usize>() {
+            return Ok(vec![ColonQueueActions::Jump(line)]);
+        }
         let mut res: Vec<ColonQueueActions> = Vec::new();
         for c in string_queue.chars() {
             let mapped_val = ColonQueueActions::try_from(c)?;
@@ -413,11 +485,10 @@ impl VimMode<'_> {
 
     #[inline]
     fn move_and_resolve(&mut self, dir: Direction) -> usize {
-        dir.move_cursor(&mut self.cursor_position, &*self.buffer);
+        dir.move_cursor(&mut self.cursor_position, &self.buffer);
         self.resolve_displacement()
     }
 
-    #[inline]
     fn wait_for_successful_event() -> Event {
         // we are waiting on a single event
         // so wait for an ok event
@@ -425,5 +496,72 @@ impl VimMode<'_> {
             let Ok(read_event) = read() else { continue };
             return read_event;
         }
+    }
+
+    fn queue_delete(&mut self) -> bool {
+        let event = Self::wait_for_successful_event();
+        if let Event::Key(KeyEvent { code, .. }) = event {
+            match code {
+                KeyCode::Char('w') => {
+                    let mut right = self.cursor_position.clone();
+                    self.buffer.begining_of_next_word(&mut right);
+                    self.buffer
+                        .delete_segment(&self.cursor_position, &mut right);
+                }
+                KeyCode::Char('b') => {
+                    let mut left = self.cursor_position.clone();
+                    self.buffer.begining_of_current_word(&mut left);
+                    self.buffer.delete_segment(&left, &mut self.cursor_position);
+                }
+                KeyCode::Char('d') => {
+                    self.buffer.pop_line(self.cursor_position.height);
+                }
+                KeyCode::Char('e') => {
+                    let mut right = self.cursor_position.clone();
+                    self.buffer.end_of_current_word(&mut right);
+                    self.buffer
+                        .delete_segment(&self.cursor_position, &mut right);
+                }
+                _ => return false,
+            }
+        } else {
+            return false;
+        };
+        true
+    }
+
+    fn queue_yank(&mut self) -> bool {
+        let event = Self::wait_for_successful_event();
+        if let Event::Key(KeyEvent { code, .. }) = event {
+            let copy_string = match code {
+                KeyCode::Char('w') => {
+                    let mut right = self.cursor_position.clone();
+                    self.buffer.begining_of_next_word(&mut right);
+                    self.buffer.get_segment(&self.cursor_position, &right)
+                }
+                KeyCode::Char('b') => {
+                    let mut left = self.cursor_position.clone();
+                    self.buffer.begining_of_current_word(&mut left);
+
+                    self.buffer.get_segment(&left, &self.cursor_position)
+                }
+                KeyCode::Char('y') => self.buffer.text[self.cursor_position.height]
+                    .raw_string
+                    .to_owned(),
+                KeyCode::Char('e') => {
+                    let mut right = self.cursor_position.clone();
+                    self.buffer.end_of_current_word(&mut right);
+                    self.buffer.get_segment(&self.cursor_position, &right)
+                }
+                _ => return false,
+            };
+            if !copy_string.is_empty() {
+                let res = ClipboardUtils::copy_text_to_clipboard(copy_string);
+                debug_assert!(res.is_ok());
+            }
+        } else {
+            return false;
+        };
+        true
     }
 }

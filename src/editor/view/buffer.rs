@@ -20,10 +20,13 @@ impl Buffer {
     }
 
     pub fn add_text_from_clipboard(&mut self, paste_text: &str, pos: &mut Position) {
+        // getting buff len
+        // when adding if current pos > buff_len
+        // need to add to buffer vec
         let mut buff_len = if self.is_empty() {
-            self.len().saturating_sub(1)
-        } else {
             0
+        } else {
+            self.len().saturating_sub(1)
         };
         for (i, line_str) in paste_text.lines().enumerate() {
             if i != 0 {
@@ -77,6 +80,33 @@ impl Buffer {
             }
         }
         positions
+    }
+
+    pub fn add_new_line(&mut self, pos: &mut Position) {
+        let grapheme_len = if self.is_empty() {
+            0
+        } else {
+            self.text[pos.height].grapheme_len()
+        };
+
+        // if at end of current line -> new blank line
+        // otherwise move all text right of cursor to new line
+        if pos.width == grapheme_len {
+            self.new_line(pos.height);
+        } else {
+            self.split_line(pos);
+        }
+
+        pos.down(1, self.len().saturating_sub(1));
+        // if prev line starts with a tab -> this line starts with a tab
+        pos.width = if self.is_tab(&Position {
+            height: pos.height,
+            width: 4,
+        }) {
+            self.num_tabs(pos.height) * 4
+        } else {
+            0
+        };
     }
 
     pub fn find_prev_word(&self, position: &mut Position) {
@@ -192,7 +222,10 @@ impl Buffer {
                 .get_mut(pos.height)
                 .expect("Out of bounds")
                 .string
-                .push(TextFragment::try_from(" ").expect("Error generating new fragment"));
+                .insert(
+                    pos.width,
+                    TextFragment::try_from(" ").expect("Error generating new fragment"),
+                );
         }
 
         self.text
@@ -298,7 +331,7 @@ impl Buffer {
         i
     }
 
-    pub fn new_line(&mut self, line_index: usize) {
+    fn new_line(&mut self, line_index: usize) {
         if self.is_empty() {
             self.text.push(Line {
                 string: Vec::new(),
@@ -393,7 +426,6 @@ impl Buffer {
         }
     }
 
-    #[inline]
     pub fn pop_line(&mut self, line_index: usize) {
         self.text.remove(line_index);
     }
@@ -438,6 +470,29 @@ impl Buffer {
         }
         // if we are here we are at the end
         pos.width = self.text.last().unwrap().grapheme_len();
+    }
+
+    pub fn get_segment(&self, start: &Position, end: &Position) -> String {
+        let mut copy_string = String::new();
+        if start.height == end.height {
+            let line_len = self.text[start.height].raw_string.len().saturating_sub(1);
+            let line_string = &self.text[start.height].raw_string;
+            let slice: String = if end.width == line_len {
+                line_string[start.width..].to_owned()
+            } else {
+                line_string[start.width..end.width].to_owned()
+            };
+            copy_string.push_str(&slice);
+        } else {
+            copy_string.push_str(&self.text[start.height].raw_string[start.width..]);
+            copy_string.push('\n');
+            for h in start.height.saturating_add(1)..end.height {
+                copy_string.push_str(&self.text[h].raw_string);
+                copy_string.push('\n');
+            }
+            copy_string.push_str(&self.text[end.height].raw_string[..=end.width]);
+        }
+        copy_string
     }
 
     pub fn end_of_current_word(&self, pos: &mut Position) {

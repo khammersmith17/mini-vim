@@ -124,8 +124,8 @@ impl TryFrom<Event> for EditorCommand {
                 (KeyCode::Char('q'), KeyModifiers::CONTROL) => Ok(Self::Quit),
                 (KeyCode::Char('j'), KeyModifiers::CONTROL) => Ok(Self::JumpLine),
                 (KeyCode::Char('l'), KeyModifiers::CONTROL) => Ok(Self::Move(Direction::Home)),
-                (KeyCode::Char('u'), KeyModifiers::CONTROL) => Ok(Self::Move(Direction::PageUp)),
-                (KeyCode::Char('d'), KeyModifiers::CONTROL) => Ok(Self::Move(Direction::PageDown)),
+                (KeyCode::Char('g'), KeyModifiers::ALT) => Ok(Self::Move(Direction::PageUp)),
+                (KeyCode::Char('g'), KeyModifiers::CONTROL) => Ok(Self::Move(Direction::PageDown)),
                 (KeyCode::Char('r'), KeyModifiers::CONTROL) => Ok(Self::Move(Direction::End)),
                 (KeyCode::Char('w'), KeyModifiers::CONTROL) => Ok(Self::Save),
                 (KeyCode::Char('h'), KeyModifiers::CONTROL) => Ok(Self::Help),
@@ -316,13 +316,18 @@ pub enum QueueInitCommand {
     PageUp,
     PageDown,
     Colon,
+    Delete,
+    Yank,
 }
 
 pub enum VimModeCommands {
     Move(Direction),
+    JumpUp,
+    JumpDown,
     StartOfNextWord,
     EndOfCurrentWord,
     BeginingOfCurrentWord,
+    NewLine,
     Highlight,
     Paste,
     NoAction,
@@ -335,22 +340,42 @@ impl TryFrom<Event> for VimModeCommands {
     type Error = String;
     fn try_from(event: Event) -> Result<Self, Self::Error> {
         match event {
-            Event::Key(KeyEvent { code, .. }) => match code {
-                KeyCode::Char('h') => Ok(Self::Move(Direction::Left)),
-                KeyCode::Char('k') => Ok(Self::Move(Direction::Up)),
-                KeyCode::Char('j') => Ok(Self::Move(Direction::Down)),
-                KeyCode::Char('l') => Ok(Self::Move(Direction::Right)),
-                KeyCode::Char('0') => Ok(Self::Move(Direction::Home)),
-                KeyCode::Char('b') => Ok(Self::BeginingOfCurrentWord),
-                KeyCode::Char('e') => Ok(Self::EndOfCurrentWord),
-                KeyCode::Char('w') => Ok(Self::StartOfNextWord),
-                KeyCode::Char('g') => Ok(Self::ComplexCommand(QueueInitCommand::PageUp)),
-                KeyCode::Char('G') => Ok(Self::ComplexCommand(QueueInitCommand::PageDown)),
-                KeyCode::Char('p') => Ok(Self::Paste),
-                KeyCode::Char('v') => Ok(Self::Highlight),
-                KeyCode::Char('$') => Ok(Self::Move(Direction::End)), //represents $
-                KeyCode::Char(':') => Ok(Self::ComplexCommand(QueueInitCommand::Colon)),
-                KeyCode::Esc => Ok(Self::Exit),
+            Event::Key(KeyEvent {
+                code, modifiers, ..
+            }) => match (code, modifiers) {
+                (KeyCode::Char('u'), KeyModifiers::CONTROL) => Ok(Self::JumpUp),
+                (KeyCode::Char('d'), KeyModifiers::CONTROL) => Ok(Self::JumpDown),
+                (KeyCode::Char('h'), KeyModifiers::NONE) => Ok(Self::Move(Direction::Left)),
+                (KeyCode::Char('k'), KeyModifiers::NONE) => Ok(Self::Move(Direction::Up)),
+                (KeyCode::Char('j'), KeyModifiers::NONE) => Ok(Self::Move(Direction::Down)),
+                (KeyCode::Char('l'), KeyModifiers::NONE) => Ok(Self::Move(Direction::Right)),
+                (KeyCode::Char('0'), KeyModifiers::NONE) => Ok(Self::Move(Direction::Home)),
+                (KeyCode::Char('b'), KeyModifiers::NONE) => Ok(Self::BeginingOfCurrentWord),
+                (KeyCode::Char('e'), KeyModifiers::NONE) => Ok(Self::EndOfCurrentWord),
+                (KeyCode::Char('w'), KeyModifiers::NONE) => Ok(Self::StartOfNextWord),
+                (KeyCode::Char('o'), KeyModifiers::NONE) => Ok(Self::NewLine),
+                (KeyCode::Char('d'), KeyModifiers::NONE) => {
+                    Ok(Self::ComplexCommand(QueueInitCommand::Delete))
+                }
+                (KeyCode::Char('y'), KeyModifiers::NONE) => {
+                    Ok(Self::ComplexCommand(QueueInitCommand::Yank))
+                }
+                (KeyCode::Char('g'), KeyModifiers::NONE) => {
+                    Ok(Self::ComplexCommand(QueueInitCommand::PageUp))
+                }
+                (KeyCode::Char('G'), KeyModifiers::NONE) => {
+                    Ok(Self::ComplexCommand(QueueInitCommand::PageDown))
+                }
+                (KeyCode::Char('p'), KeyModifiers::NONE) => Ok(Self::Paste),
+                (KeyCode::Char('v'), KeyModifiers::NONE) => Ok(Self::Highlight),
+                (KeyCode::Char('$'), KeyModifiers::NONE) => Ok(Self::Move(Direction::End)), //represents $
+                (KeyCode::Char(':'), KeyModifiers::NONE) => {
+                    Ok(Self::ComplexCommand(QueueInitCommand::Colon))
+                }
+                (KeyCode::Esc, KeyModifiers::NONE) | (KeyCode::Char('i'), KeyModifiers::NONE) => {
+                    Ok(Self::Exit)
+                }
+
                 _ => Ok(Self::NoAction),
             },
             #[allow(clippy::as_conversions)]
@@ -395,6 +420,7 @@ pub enum ColonQueueActions {
     Write,
     Quit,
     Override,
+    Jump(usize),
 }
 
 impl TryFrom<char> for ColonQueueActions {

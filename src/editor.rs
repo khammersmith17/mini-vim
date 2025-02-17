@@ -14,22 +14,8 @@ use editorcommands::EditorCommand;
 #[derive(Default)]
 pub struct Editor {
     view: View,
-    should_quit: bool,
+    // should_quit: bool,
 }
-
-//TODO:
-//rework render logic
-//need the ability to paritially render or not render at all
-//without storing a flag for it in the class
-//
-//
-//current main loop
-//wait for next event
-//read it in
-//get the command
-//evaluate it for action
-//get the render status back from the view
-//evaluate for rendering
 
 impl Editor {
     pub fn new() -> Result<Self, Error> {
@@ -50,23 +36,29 @@ impl Editor {
             };
         }
         Ok(Self {
-            should_quit: false,
+            // should_quit: false,
             view,
         })
     }
 
     pub fn run(&mut self) -> Result<(), Error> {
+        // inital render
+        let res = self.view.start();
+        debug_assert!(res.is_ok());
         loop {
-            let refresh = self.refresh_screen();
-            if !refresh.is_ok() {
-                continue; // refresh again if there is an error state
-            }
-            if self.should_quit {
-                break;
-            }
+            /*
+                        if self.should_quit {
+                            break;
+                        }
+            */
             match read() {
                 Ok(event) => {
-                    let _ = self.evaluate_event(event);
+                    if let Ok(cont) = self.evaluate_event(event) {
+                        if !cont {
+                            break;
+                        }
+                    }
+
                     //silencing errors here, users will just see nothing happen
                 }
                 Err(err) => {
@@ -80,7 +72,7 @@ impl Editor {
         Ok(())
     }
     #[allow(clippy::needless_pass_by_value)]
-    fn evaluate_event(&mut self, event: Event) -> Result<(), Error> {
+    fn evaluate_event(&mut self, event: Event) -> Result<bool, Error> {
         let should_process = match &event {
             Event::Key(KeyEvent { kind, .. }) => kind == &KeyEventKind::Press,
             Event::Resize(_, _) => true,
@@ -107,12 +99,12 @@ impl Editor {
                                 }
                             }
                         }
-                        self.should_quit = true;
+                        return Ok(false);
                     } else {
                         // process the event
                         // handle is any downtream commands quit the session
                         if let Ok(should_continue) = self.view.handle_event(command) {
-                            self.should_quit = !should_continue;
+                            return Ok(should_continue);
                         }
                     }
                 }
@@ -129,7 +121,7 @@ impl Editor {
                 panic!("Unsupported event")
             }
         }
-        Ok(())
+        Ok(true)
     }
 
     fn exit_without_saving() -> Result<bool, Error> {
@@ -138,6 +130,7 @@ impl Editor {
         Terminal::render_line(0, "Leave without saving:")?;
         Terminal::render_line(1, "Ctrl-y = exit | Ctrl-n = save")?;
         Terminal::execute()?;
+
         loop {
             match read() {
                 Ok(event) => {
@@ -170,15 +163,30 @@ impl Editor {
         }
     }
 
+    /*
     fn refresh_screen(&mut self) -> Result<(), Error> {
         Terminal::hide_cursor()?;
         Terminal::move_cursor_to(self.view.screen_offset.to_position())?;
         Terminal::clear_screen()?;
-        if self.should_quit {
-            Terminal::print("Goodbye.\r\n")?;
-        } else if self.view.needs_redraw {
-            let _ = self.view.render(true);
-        }
+        /*
+                if self.should_quit {
+                    Terminal::print("Goodbye.\r\n")?;
+                } else if self.view.needs_redraw {
+                    let _ = self.view.render(true);
+                }
+        */
+        let _ = self.view.render(true);
+        Terminal::render_status_line(
+            Mode::Insert,
+            self.buffer.is_saved,
+            &self.size,
+            self.buffer.filename.as_deref(),
+            Some((
+                self.cursor_position.height.saturating_add(1),
+                self.buffer.len(),
+            )),
+        )?;
+        Terminal::render_status_line()
         Terminal::move_cursor_to(
             self.view
                 .cursor_position
@@ -188,14 +196,13 @@ impl Editor {
         Terminal::execute()?;
         Ok(())
     }
+    */
 }
 
 impl Drop for Editor {
     fn drop(&mut self) {
         let _ = Terminal::set_cursor_style(SetCursorStyle::DefaultUserShape);
         let _ = Terminal::terminate();
-        if self.should_quit {
-            let _ = Terminal::print("Goodbye.\r\n");
-        }
+        let _ = Terminal::print("Goodbye.\r\n");
     }
 }

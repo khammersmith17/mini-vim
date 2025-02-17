@@ -15,8 +15,8 @@ If there are changes to the file state when trying to exit, a message will appea
 Like other terminal based text editors, there are a number of commands.\
 Ctrl-q = Quit\
 Ctrl-l = Snap cursor to end of line\
-Ctrl-u = Snap cursor to first line\
-Ctrl-d = Snap cursor to last line\
+Alt-g = Snap cursor to first line\
+Ctrl-g = Snap cursor to last line\
 Ctrl-r = Snap cursor to first line\
 Ctrl-w = Save\
 Ctrl-c = Help\
@@ -56,9 +56,12 @@ h = left\
 j = down\
 k = up\
 l = right\
+o = new-line\
 0 = snap left\
 $ = snap right\
-Esc = exit vim mode\
+d = delete\
+y = yank\
+Esc | i = exit vim mode\
 gg = page up\
 GG = page down\
 :w = write\

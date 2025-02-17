@@ -110,7 +110,7 @@ impl Highlight<'_> {
             debug_assert!(res.is_ok());
         }
 
-        let copy_string = self.generate_copy_str(&*self.start);
+        let copy_string = self.generate_copy_str();
 
         if !copy_string.is_empty() {
             let res = ClipboardUtils::copy_text_to_clipboard(copy_string);
@@ -203,30 +203,11 @@ impl Highlight<'_> {
             self.or = Orientation::EndFirst;
         }
     }
-    pub fn generate_copy_str(&self, start: &Position) -> String {
-        let mut copy_string = String::new();
-        if start.height == self.end.height {
-            let line_len = self.buffer.text[start.height]
-                .raw_string
-                .len()
-                .saturating_sub(1);
-            let line_string = &self.buffer.text[start.height].raw_string;
-            let slice: String = if self.end.width == line_len {
-                line_string[start.width..].to_owned()
-            } else {
-                line_string[start.width..self.end.width].to_owned()
-            };
-            copy_string.push_str(&slice);
-        } else {
-            copy_string.push_str(&self.buffer.text[start.height].raw_string[start.width..]);
-            copy_string.push('\n');
-            for h in start.height.saturating_add(1)..self.end.height {
-                copy_string.push_str(&self.buffer.text[h].raw_string);
-                copy_string.push('\n');
-            }
-            copy_string.push_str(&self.buffer.text[self.end.height].raw_string[..=self.end.width]);
+    pub fn generate_copy_str(&self) -> String {
+        match self.or {
+            Orientation::StartFirst => self.buffer.get_segment(&self.start, &self.end),
+            Orientation::EndFirst => self.buffer.get_segment(&self.end, &self.start),
         }
-        copy_string
     }
 
     pub fn update_offset(&mut self) {
@@ -321,19 +302,23 @@ impl Highlight<'_> {
             }
 
             let line_text = &self.buffer.text[line_height].raw_string;
+
             // if line width not on screen
             if line_text.len().saturating_sub(1) < *visible_width_range.start() {
                 continue;
             }
 
             // get the visible portion of the line
-            let Some(visible_line) = line_text.get(
-                *visible_width_range.start()
+            // if line is empty -> " " so we get some highlight on the line
+            let visible_line: &str = if line_text.is_empty() {
+                " "
+            } else if line_text.len() > *visible_width_range.start() {
+                &line_text[*visible_width_range.start()
                     ..=std::cmp::min(
                         *visible_width_range.end(),
                         line_text.len().saturating_sub(1),
-                    ),
-            ) else {
+                    )]
+            } else {
                 continue;
             };
 

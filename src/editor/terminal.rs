@@ -496,7 +496,7 @@ impl Terminal {
     ) -> Result<(), Error> {
         let saved = if saved { "saved" } else { "modified" };
         let filename = filename.unwrap_or("-");
-        let render_message = if let Some((line, len)) = line_pos {
+        let mut render_message = if let Some((line, len)) = line_pos {
             format!(
                 "Mode: {} | Filename: {filename} | Status: {saved} | Line: {line} / {len}",
                 mode.to_string()
@@ -507,6 +507,7 @@ impl Terminal {
                 mode.to_string()
             )
         };
+        render_message.truncate(size.width);
         Self::render_line(size.height.saturating_sub(1), render_message)?;
         Ok(())
     }

@@ -27,12 +27,13 @@ use clipboard_interface::ClipboardUtils;
 //if the line we move to is as long or longer, go to max width
 //when we move right max width++
 //when we go left max width--
-//ALSO
-//when a line changes
-//only rerender that line
-//when there is a new line and the buffer goes beyond the offset, render
-//the lines below
-//if there is just a char entered, rerender just that line
+
+enum ScreenUpdateType {
+    FullScreen,
+    MultiLineRender,
+    SingleLineRender,
+    DefaultAction, // need to set cursor and render the status line every event
+}
 
 pub const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
 pub const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -48,7 +49,6 @@ pub struct View {
     pub cursor_position: Position,
     pub screen_offset: ScreenOffset,
     pub theme: Theme,
-    pub needs_redraw: bool,
     pub buffer: Buffer,
 }
 
@@ -56,7 +56,6 @@ impl Default for View {
     fn default() -> Self {
         Self {
             buffer: Buffer::default(),
-            needs_redraw: true,
             size: Terminal::size().unwrap_or_default(),
             cursor_position: Position::default(),
             screen_offset: ScreenOffset::default(),
@@ -66,7 +65,14 @@ impl Default for View {
 }
 
 impl View {
-    pub fn render(&mut self, full_screen: bool) -> Result<(), Box<dyn Error>> {
+    pub fn start(&self) -> Result<(), Box<dyn Error>> {
+        self.full_screen_render()?;
+        self.set_cursor_and_status()?;
+        Terminal::execute()?;
+        Ok(())
+    }
+
+    pub fn render(&self, full_screen: bool) -> Result<(), Box<dyn Error>> {
         // if offset == height then this will be the same
         let start = if full_screen {
             self.screen_offset.height
@@ -101,40 +107,31 @@ impl View {
                 Self::render_line(relative_row, "~");
             }
         }
-
-        Terminal::render_status_line(
-            Mode::Insert,
-            self.buffer.is_saved,
-            &self.size,
-            self.buffer.filename.as_deref(),
-            Some((
-                self.cursor_position.height.saturating_add(1),
-                self.buffer.len(),
-            )),
-        )?;
-
-        self.needs_redraw = false;
         Ok(())
     }
 
     #[inline(always)] // this should be very hot
-    fn evaluate_view_state_change(&mut self) {
+    fn evaluate_view_state_change(&mut self) -> ScreenUpdateType {
         let view_delta = self.check_offset();
         if view_delta == 0 {
-            // delete and render only the current line
-            Self::render_line(
-                self.cursor_position
-                    .height
-                    .saturating_sub(self.screen_offset.height),
-                self.buffer.text[self.cursor_position.height].get_line_subset(
-                    self.screen_offset.width
-                        ..self.screen_offset.width.saturating_add(self.size.width),
-                ),
-            )
+            ScreenUpdateType::SingleLineRender
         } else {
-            let res = self.render(true);
-            debug_assert!(res.is_ok());
+            ScreenUpdateType::FullScreen
         }
+    }
+
+    fn full_screen_render(&self) -> Result<(), Box<dyn Error>> {
+        Terminal::hide_cursor()?;
+        Terminal::move_cursor_to(self.screen_offset.to_position())?;
+        Terminal::clear_screen()?;
+        self.render(true)?;
+        Terminal::move_cursor_to(
+            self.cursor_position
+                .relative_view_position(&self.screen_offset),
+        )?;
+        Terminal::show_cursor()?;
+        Terminal::execute()?;
+        Ok(())
     }
 
     #[inline]
@@ -160,7 +157,6 @@ impl View {
         }
         if let Ok(buffer) = Buffer::load(filename) {
             self.buffer = buffer;
-            self.needs_redraw = true;
         } else {
             self.buffer = Buffer::load_named_empty(filename);
         }
@@ -226,7 +222,6 @@ impl View {
         }
 
         self.buffer.assume_file_name(filename_buffer);
-        self.needs_redraw = true;
     }
 
     fn render_filename_screen(curr_filename: &str, curr_position: usize) {
@@ -247,53 +242,53 @@ impl View {
         Terminal::execute().unwrap();
     }
 
+    fn set_cursor_and_status(&self) -> Result<(), Box<dyn Error>> {
+        Terminal::render_status_line(
+            Mode::Insert,
+            self.buffer.is_saved,
+            &self.size,
+            self.buffer.filename.as_deref(),
+            Some((
+                self.cursor_position.height.saturating_add(1),
+                self.buffer.len(),
+            )),
+        )?;
+        Terminal::move_cursor_to(
+            self.cursor_position
+                .relative_view_position(&self.screen_offset),
+        )?;
+        Terminal::show_cursor()?;
+        Ok(())
+    }
+
     pub fn handle_event(&mut self, command: EditorCommand) -> Result<bool, Box<dyn Error>> {
-        //match the event to the enum value and handle the event accordingly
-        //return true to continue false to quit
-        //so we can propogate up quit from vim mode
-        //ordered these in what I think will be how often they are used
-        //TODO:
-        //figure out some logic for when we need to render the whole screen,
-        //a subset of the screen
-        //or a single line
         let mut continue_status: bool = true;
+        let mut render_type: ScreenUpdateType = ScreenUpdateType::DefaultAction;
         match command {
             EditorCommand::Move(direction) => {
                 // if offset changes, render the entire screen
                 self.move_cursor(direction);
                 let view_delta = self.check_offset();
-                if view_delta == 0 {
-                    Terminal::move_cursor_to(
-                        self.cursor_position
-                            .relative_view_position(&self.screen_offset),
-                    )?;
-                    Terminal::render_status_line(
-                        Mode::Insert,
-                        self.buffer.is_saved,
-                        &self.size,
-                        self.buffer.filename.as_deref(),
-                        Some((
-                            self.cursor_position.height.saturating_add(1),
-                            self.buffer.len(),
-                        )),
-                    )?
+                render_type = if view_delta == 0 {
+                    ScreenUpdateType::DefaultAction
                 } else {
-                    self.render(true)?;
-                }
+                    ScreenUpdateType::FullScreen
+                };
             }
             EditorCommand::Insert(char) => {
                 self.insert_char(char);
-                self.evaluate_view_state_change();
+                render_type = self.evaluate_view_state_change();
             }
             EditorCommand::Delete => {
                 self.deletion();
             }
             EditorCommand::Tab => {
                 self.insert_tab();
-                self.evaluate_view_state_change();
+                render_type = self.evaluate_view_state_change();
             }
             EditorCommand::NewLine => {
                 self.new_line();
+                render_type = ScreenUpdateType::MultiLineRender;
             }
             EditorCommand::JumpWord(direction) => self.jump_word(direction),
             EditorCommand::Save => {
@@ -302,12 +297,28 @@ impl View {
                     self.get_file_name();
                 }
                 self.buffer.save();
+                // onyl status line needs to change
+                Terminal::render_status_line(
+                    Mode::Insert,
+                    self.buffer.is_saved,
+                    &self.size,
+                    self.buffer.filename.as_deref(),
+                    Some((
+                        self.cursor_position.height.saturating_add(1),
+                        self.buffer.len(),
+                    )),
+                )?;
+                Terminal::move_cursor_to(
+                    self.cursor_position
+                        .relative_view_position(&self.screen_offset),
+                )?;
             }
             EditorCommand::Resize(size) => {
                 // render always
                 self.resize(size);
                 self.check_offset(); // cursor may no longer be on screen
-                self.render(true)?;
+                                     // self.render(true)?;
+                render_type = ScreenUpdateType::FullScreen;
             }
 
             EditorCommand::Paste => {
@@ -317,6 +328,8 @@ impl View {
                 };
                 self.buffer
                     .add_text_from_clipboard(&paste_text, &mut self.cursor_position);
+                // self.render(true)?;
+                render_type = ScreenUpdateType::FullScreen;
             }
             EditorCommand::VimMode => {
                 let mut vim_mode = VimMode::new(
@@ -332,6 +345,9 @@ impl View {
                     self.theme.highlight,
                     self.theme.text,
                 );
+                //self.full_screen_render()?;
+
+                render_type = ScreenUpdateType::FullScreen;
             }
             EditorCommand::Highlight => {
                 let mut highlight = Highlight::new(
@@ -345,7 +361,8 @@ impl View {
                     self.theme.text,
                     parse_highlight_normal_mode,
                 );
-                self.check_offset(); // making sure the offset is correct on a delete
+                let _ = self.check_offset(); // making sure the offset is correct on a delete
+                render_type = ScreenUpdateType::FullScreen;
             }
             EditorCommand::Search => {
                 let mut search = Search::new(
@@ -360,66 +377,71 @@ impl View {
                     &mut self.size,
                     &self.buffer,
                 );
+
+                render_type = ScreenUpdateType::FullScreen;
             }
             EditorCommand::JumpLine => {
-                self.jump_cursor()?
+                self.jump_cursor()?;
+                render_type = if self.check_offset() > 0 {
+                    ScreenUpdateType::FullScreen
+                } else {
+                    ScreenUpdateType::DefaultAction
+                };
+
                 // check to see if offset changes
                 // if so render the entire screen
                 // otherwise only move cursor
             }
             EditorCommand::Help => {
                 Help::render_help(&mut self.size, self.theme.highlight, self.theme.text);
+                self.full_screen_render()?;
             }
 
             EditorCommand::Quit => continue_status = false,
             EditorCommand::Theme => {
                 self.theme.set_theme();
+                render_type = ScreenUpdateType::FullScreen;
             }
             _ => {}
         }
+        self.eval_screen_update(render_type)?;
+        self.set_cursor_and_status()?;
         Terminal::execute()?;
-        self.needs_redraw = true;
         Ok(continue_status)
     }
 
-    fn new_line(&mut self) {
-        let grapheme_len = if self.buffer.is_empty() {
-            0
-        } else {
-            self.buffer.text[self.cursor_position.height].grapheme_len()
-        };
-
-        // if at end of current line -> new blank line
-        // otherwise move all text right of cursor to new line
-        if self.cursor_position.width == grapheme_len {
-            self.buffer.new_line(self.cursor_position.height);
-        } else {
-            self.buffer.split_line(&self.cursor_position);
+    fn eval_screen_update(&self, update_t: ScreenUpdateType) -> Result<(), Box<dyn Error>> {
+        match update_t {
+            ScreenUpdateType::FullScreen => self.full_screen_render()?,
+            ScreenUpdateType::SingleLineRender => {
+                Self::render_line(
+                    self.cursor_position
+                        .height
+                        .saturating_sub(self.screen_offset.height),
+                    self.buffer.text[self.cursor_position.height].get_line_subset(
+                        self.screen_offset.width
+                            ..self.screen_offset.width.saturating_add(self.size.width),
+                    ),
+                );
+            }
+            ScreenUpdateType::MultiLineRender => {
+                self.render(false)?;
+            }
+            _ => {
+                // no additional action is required
+            }
         }
+        Ok(())
+    }
 
-        self.cursor_position
-            .down(1, self.buffer.len().saturating_sub(1));
-        // if prev line starts with a tab -> this line starts with a tab
-        self.cursor_position.width = if self.buffer.is_tab(&Position {
-            height: self.cursor_position.height,
-            width: 4,
-        }) {
-            self.buffer.num_tabs(self.cursor_position.height) * 4
-        } else {
-            0
-        };
+    fn new_line(&mut self) -> ScreenUpdateType {
+        self.buffer.add_new_line(&mut self.cursor_position);
         // handling if the new line is currently off screen
         let view_delta = self.check_offset();
         if view_delta > 1 {
-            let res = self.render(true);
-            debug_assert!(res.is_ok());
-        }
-
-        // if the end of the buffer is on the screen
-        // here we have screen space to add the new line
-        if self.screen_offset.height.saturating_add(self.size.height) > self.buffer.len() {
-            let res = self.render(false);
-            debug_assert!(res.is_ok());
+            ScreenUpdateType::FullScreen
+        } else {
+            ScreenUpdateType::MultiLineRender
         }
     }
 
@@ -479,7 +501,11 @@ impl View {
         // evaluate how much of the screen we need to render
         let view_delta = self.check_offset();
         let res = self.render(if view_delta > 0 { true } else { false });
-        debug_assert!(res.is_ok());
+        let move_res = Terminal::move_cursor_to(
+            self.cursor_position
+                .relative_view_position(&self.screen_offset),
+        );
+        debug_assert!(res.is_ok() && move_res.is_ok());
     }
 
     fn jump_cursor(&mut self) -> Result<(), Box<dyn Error>> {
