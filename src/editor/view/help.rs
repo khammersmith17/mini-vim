@@ -1,6 +1,6 @@
 use super::Size;
 use crate::editor::editorcommands::HelpCommand;
-use crate::editor::terminal::{Position, Terminal};
+use crate::editor::terminal::{ScreenPosition, Terminal};
 use crossterm::event::{read, Event, KeyEvent};
 use crossterm::style::{Color, PrintStyledContent, StyledContent, Stylize};
 
@@ -122,7 +122,7 @@ impl Help {
             let help_map = HelpKeys::from(*item).value();
             let highlight_seg: StyledContent<String> =
                 help_map.help_str.to_owned().with(t_color).on(h_color);
-            Terminal::move_cursor_to(Position {
+            Terminal::move_cursor_to(ScreenPosition {
                 height: size.height.saturating_sub(help_map.offset),
                 width: 0,
             })
@@ -267,7 +267,7 @@ impl VimHelpScreen {
             let help_map = VimKeyBindings::from(*item).value();
             let highlight_seg: StyledContent<String> =
                 help_map.help_str.to_owned().with(t_color).on(h_color);
-            Terminal::move_cursor_to(Position {
+            Terminal::move_cursor_to(ScreenPosition {
                 height: size.height.saturating_sub(help_map.offset),
                 width: 0,
             })

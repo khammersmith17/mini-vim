@@ -7,8 +7,8 @@ impl ClipboardUtils {
     #[inline]
     pub fn copy_text_to_clipboard(content: String) -> Result<(), Box<dyn Error>> {
         let mut ctx = ClipboardContext::new()?;
-        let res = ctx.set_contents(content)?;
-        Ok(res)
+        ctx.set_contents(content)?;
+        Ok(())
     }
 
     #[inline]

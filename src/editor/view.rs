@@ -1,7 +1,7 @@
 use super::editorcommands::{
     parse_highlight_normal_mode, Direction, EditorCommand, FileNameCommand, JumpCommand,
 };
-use super::terminal::{Coordinate, Mode, Position, ScreenOffset, Size, Terminal};
+use super::terminal::{Coordinate, Mode, Position, ScreenOffset, ScreenPosition, Size, Terminal};
 use crossterm::event::read;
 use std::{error::Error, path::Path};
 pub mod buffer;
@@ -20,19 +20,11 @@ use vim_mode::VimMode;
 mod clipboard_interface;
 use clipboard_interface::ClipboardUtils;
 
-//TODO:
-//add in a feature where we keep track of the max width of the cursor
-//when we go left, we decrement
-//if the line we move to up or down is not as long, go to the max
-//if the line we move to is as long or longer, go to max width
-//when we move right max width++
-//when we go left max width--
-
 enum ScreenUpdateType {
     FullScreen,
     MultiLineRender,
     SingleLineRender,
-    DefaultAction, // need to set cursor and render the status line every event
+    DefaultAction,
 }
 
 pub const PROGRAM_NAME: &str = env!("CARGO_PKG_NAME");
@@ -41,6 +33,7 @@ pub const PROGRAM_VERSION: &str = env!("CARGO_PKG_VERSION");
 const ORIGIN_POSITION: Position = Position {
     height: 0_usize,
     width: 0_usize,
+    max_width: 0_usize,
 };
 
 /// the core logic
@@ -72,12 +65,10 @@ impl View {
         Ok(())
     }
 
-    pub fn render(&self, full_screen: bool) -> Result<(), Box<dyn Error>> {
-        // if offset == height then this will be the same
+    pub fn render(&self, full_screen: bool) {
         let start = if full_screen {
             self.screen_offset.height
         } else {
-            // this will prevent underflow if height = 0
             self.cursor_position.height.saturating_sub(1)
         };
         #[allow(clippy::integer_division)]
@@ -107,10 +98,9 @@ impl View {
                 Self::render_line(relative_row, "~");
             }
         }
-        Ok(())
     }
 
-    #[inline(always)] // this should be very hot
+    #[inline] // this should be very hot
     fn evaluate_view_state_change(&mut self) -> ScreenUpdateType {
         let view_delta = self.check_offset();
         if view_delta == 0 {
@@ -124,7 +114,7 @@ impl View {
         Terminal::hide_cursor()?;
         Terminal::move_cursor_to(self.screen_offset.to_position())?;
         Terminal::clear_screen()?;
-        self.render(true)?;
+        self.render(true);
         Terminal::move_cursor_to(
             self.cursor_position
                 .relative_view_position(&self.screen_offset),
@@ -226,14 +216,14 @@ impl View {
 
     fn render_filename_screen(curr_filename: &str, curr_position: usize) {
         Terminal::hide_cursor().unwrap();
-        Terminal::move_cursor_to(Position {
+        Terminal::move_cursor_to(ScreenPosition {
             height: 0,
             width: 0,
         })
         .unwrap();
         Terminal::clear_screen().unwrap();
         Self::render_line(0, format!("Filename: {}", &curr_filename));
-        Terminal::move_cursor_to(Position {
+        Terminal::move_cursor_to(ScreenPosition {
             height: 0,
             width: curr_position,
         })
@@ -244,7 +234,7 @@ impl View {
 
     fn set_cursor_and_status(&self) -> Result<(), Box<dyn Error>> {
         Terminal::render_status_line(
-            Mode::Insert,
+            &Mode::Insert,
             self.buffer.is_saved,
             &self.size,
             self.buffer.filename.as_deref(),
@@ -259,6 +249,85 @@ impl View {
         )?;
         Terminal::show_cursor()?;
         Ok(())
+    }
+
+    fn save(&mut self) -> Result<(), Box<dyn Error>> {
+        // no need to render here
+        if self.buffer.filename.is_none() {
+            self.get_file_name();
+        }
+        self.buffer.save();
+        // onyl status line needs to change
+        Terminal::render_status_line(
+            &Mode::Insert,
+            self.buffer.is_saved,
+            &self.size,
+            self.buffer.filename.as_deref(),
+            Some((
+                self.cursor_position.height.saturating_add(1),
+                self.buffer.len(),
+            )),
+        )?;
+        Terminal::move_cursor_to(
+            self.cursor_position
+                .relative_view_position(&self.screen_offset),
+        )?;
+        Ok(())
+    }
+
+    fn paste_text(&mut self) -> Option<bool> {
+        // render always
+        let Ok(paste_text) = ClipboardUtils::get_text_from_clipboard() else {
+            return Some(true); // handling an error here
+        };
+        self.buffer
+            .add_text_from_clipboard(&paste_text, &mut self.cursor_position);
+        None
+    }
+
+    fn enter_vim_mode(&mut self) -> bool {
+        let mut vim_mode = VimMode::new(
+            self.cursor_position,
+            self.screen_offset,
+            self.size,
+            &mut self.buffer,
+        );
+        vim_mode.run(
+            &mut self.cursor_position,
+            &mut self.screen_offset,
+            &mut self.size,
+            self.theme.highlight,
+            self.theme.text,
+        )
+    }
+
+    fn enter_highlight_mode(&mut self) {
+        let mut highlight = Highlight::new(
+            &mut self.cursor_position,
+            self.screen_offset,
+            &mut self.size,
+            &mut self.buffer,
+        );
+        highlight.run(
+            self.theme.highlight,
+            self.theme.text,
+            parse_highlight_normal_mode,
+        );
+    }
+
+    fn enter_search_mode(&mut self) {
+        let mut search = Search::new(
+            self.cursor_position,
+            self.screen_offset,
+            self.theme.highlight,
+            self.theme.text,
+        );
+        search.run(
+            &mut self.cursor_position,
+            &mut self.screen_offset,
+            &mut self.size,
+            &self.buffer,
+        );
     }
 
     pub fn handle_event(&mut self, command: EditorCommand) -> Result<bool, Box<dyn Error>> {
@@ -291,106 +360,36 @@ impl View {
                 render_type = ScreenUpdateType::MultiLineRender;
             }
             EditorCommand::JumpWord(direction) => self.jump_word(direction),
-            EditorCommand::Save => {
-                // no need to render here
-                if self.buffer.filename.is_none() {
-                    self.get_file_name();
-                }
-                self.buffer.save();
-                // onyl status line needs to change
-                Terminal::render_status_line(
-                    Mode::Insert,
-                    self.buffer.is_saved,
-                    &self.size,
-                    self.buffer.filename.as_deref(),
-                    Some((
-                        self.cursor_position.height.saturating_add(1),
-                        self.buffer.len(),
-                    )),
-                )?;
-                Terminal::move_cursor_to(
-                    self.cursor_position
-                        .relative_view_position(&self.screen_offset),
-                )?;
-            }
+            EditorCommand::Save => self.save()?,
             EditorCommand::Resize(size) => {
                 // render always
                 self.resize(size);
                 self.check_offset(); // cursor may no longer be on screen
-                                     // self.render(true)?;
                 render_type = ScreenUpdateType::FullScreen;
             }
 
             EditorCommand::Paste => {
-                // render always
-                let Ok(paste_text) = ClipboardUtils::get_text_from_clipboard() else {
-                    return Ok(true); // handling an error here
-                };
-                self.buffer
-                    .add_text_from_clipboard(&paste_text, &mut self.cursor_position);
                 // self.render(true)?;
+                if let Some(_failed_paste) = self.paste_text() {
+                    return Ok(true);
+                }
                 render_type = ScreenUpdateType::FullScreen;
             }
             EditorCommand::VimMode => {
-                let mut vim_mode = VimMode::new(
-                    self.cursor_position,
-                    self.screen_offset,
-                    self.size,
-                    &mut self.buffer,
-                );
-                continue_status = vim_mode.run(
-                    &mut self.cursor_position,
-                    &mut self.screen_offset,
-                    &mut self.size,
-                    self.theme.highlight,
-                    self.theme.text,
-                );
-                //self.full_screen_render()?;
-
+                self.enter_vim_mode();
                 render_type = ScreenUpdateType::FullScreen;
             }
             EditorCommand::Highlight => {
-                let mut highlight = Highlight::new(
-                    &mut self.cursor_position,
-                    self.screen_offset,
-                    &mut self.size,
-                    &mut self.buffer,
-                );
-                highlight.run(
-                    self.theme.highlight,
-                    self.theme.text,
-                    parse_highlight_normal_mode,
-                );
+                self.enter_highlight_mode();
                 let _ = self.check_offset(); // making sure the offset is correct on a delete
                 render_type = ScreenUpdateType::FullScreen;
             }
             EditorCommand::Search => {
-                let mut search = Search::new(
-                    self.cursor_position,
-                    self.screen_offset,
-                    self.theme.highlight,
-                    self.theme.text,
-                );
-                search.run(
-                    &mut self.cursor_position,
-                    &mut self.screen_offset,
-                    &mut self.size,
-                    &self.buffer,
-                );
-
+                self.enter_search_mode();
                 render_type = ScreenUpdateType::FullScreen;
             }
             EditorCommand::JumpLine => {
-                self.jump_cursor()?;
-                render_type = if self.check_offset() > 0 {
-                    ScreenUpdateType::FullScreen
-                } else {
-                    ScreenUpdateType::DefaultAction
-                };
-
-                // check to see if offset changes
-                // if so render the entire screen
-                // otherwise only move cursor
+                render_type = self.jump_cursor()?;
             }
             EditorCommand::Help => {
                 Help::render_help(&mut self.size, self.theme.highlight, self.theme.text);
@@ -402,15 +401,15 @@ impl View {
                 self.theme.set_theme();
                 render_type = ScreenUpdateType::FullScreen;
             }
-            _ => {}
+            EditorCommand::None => {}
         }
-        self.eval_screen_update(render_type)?;
+        self.eval_screen_update(&render_type)?;
         self.set_cursor_and_status()?;
         Terminal::execute()?;
         Ok(continue_status)
     }
 
-    fn eval_screen_update(&self, update_t: ScreenUpdateType) -> Result<(), Box<dyn Error>> {
+    fn eval_screen_update(&self, update_t: &ScreenUpdateType) -> Result<(), Box<dyn Error>> {
         match update_t {
             ScreenUpdateType::FullScreen => self.full_screen_render()?,
             ScreenUpdateType::SingleLineRender => {
@@ -425,9 +424,9 @@ impl View {
                 );
             }
             ScreenUpdateType::MultiLineRender => {
-                self.render(false)?;
+                self.render(false);
             }
-            _ => {
+            ScreenUpdateType::DefaultAction => {
                 // no additional action is required
             }
         }
@@ -500,32 +499,58 @@ impl View {
 
         // evaluate how much of the screen we need to render
         let view_delta = self.check_offset();
-        let res = self.render(if view_delta > 0 { true } else { false });
+        self.render(view_delta > 0);
         let move_res = Terminal::move_cursor_to(
             self.cursor_position
                 .relative_view_position(&self.screen_offset),
         );
-        debug_assert!(res.is_ok() && move_res.is_ok());
+        debug_assert!(move_res.is_ok());
     }
 
-    fn jump_cursor(&mut self) -> Result<(), Box<dyn Error>> {
+    fn overwrite_last_line(&self) -> Result<(), Box<dyn Error>> {
+        let l = self
+            .screen_offset
+            .height
+            .saturating_add(self.size.height)
+            .saturating_sub(2);
+
+        if self.buffer.len() >= l {
+            Terminal::render_line(
+                self.size.height.saturating_sub(2),
+                self.buffer.text[l].get_line_subset(
+                    self.screen_offset.width
+                        ..self.screen_offset.width.saturating_add(self.size.width),
+                ),
+            )?;
+        } else {
+            Terminal::render_line(self.size.height.saturating_sub(1), "~")?;
+        }
+        Terminal::execute()?;
+        Ok(())
+    }
+
+    fn jump_cursor(&mut self) -> Result<ScreenUpdateType, Box<dyn Error>> {
         let neg_2 = self.size.height.saturating_sub(2);
-        let render_string: String = "Jump to: ".into();
+        let render_string: &str = "Jump to: ";
         let mut line = 0_usize;
-        Terminal::move_cursor_to(Position {
+        Terminal::move_cursor_to(ScreenPosition {
             height: neg_2,
             width: 0,
-        })
-        .unwrap();
-        Terminal::render_line(neg_2, render_string.to_string()).unwrap();
-        Terminal::execute().unwrap();
+        })?;
 
         loop {
+            let render_line = if line != 0 {
+                format!("{render_string}{line}")
+            } else {
+                format!("{render_string}")
+            };
+            Terminal::render_line(neg_2, render_line)?;
+            Terminal::execute()?;
             let Ok(read_event) = read() else { continue }; //skipping errors here
             match JumpCommand::try_from(read_event) {
                 Ok(command) => match command {
                     JumpCommand::Enter(digit) => {
-                        line = line.saturating_mul(10).saturating_sub(digit);
+                        line = std::cmp::max(1, line.saturating_mul(10).saturating_sub(digit));
                     }
                     #[allow(clippy::integer_division)]
                     JumpCommand::Delete => line = if line > 9 { line / 10 } else { 0 },
@@ -547,10 +572,16 @@ impl View {
                                 1,
                                 self.buffer.len(),
                             );
+                            return Ok(ScreenUpdateType::FullScreen);
                         }
-                        return Ok(());
+
+                        self.overwrite_last_line()?;
+                        return Ok(ScreenUpdateType::DefaultAction);
                     }
-                    JumpCommand::Exit => return Ok(()),
+                    JumpCommand::Exit => {
+                        self.overwrite_last_line()?;
+                        return Ok(ScreenUpdateType::DefaultAction);
+                    }
                     JumpCommand::NoAction => continue,
                 },
                 Err(_) => continue,

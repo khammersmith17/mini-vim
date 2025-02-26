@@ -1,6 +1,6 @@
 use crate::editor::editorcommands::SearchCommand;
 use crate::editor::{
-    terminal::{Mode, Position, ScreenOffset, Size, Terminal},
+    terminal::{Coordinate, Mode, Position, ScreenOffset, ScreenPosition, Size, Terminal},
     view::Buffer,
 };
 use crossterm::event::read;
@@ -92,7 +92,6 @@ impl Search {
                     SearchCommand::Previous => {
                         //snap to previous result
                         if !self.stack.is_empty() {
-                            //let curr_results = self.stack.get(self.stack.len() - 1).unwrap();
                             let curr_results = self.stack.last().unwrap();
                             self.index = if self.index > 0 {
                                 self.index.saturating_sub(1)
@@ -145,20 +144,43 @@ impl Search {
             self.cursor_position = self.stack.last().unwrap()[self.index];
 
             // if the search position is out of current screen bounds
-            if !self
-                .cursor_position
-                .height_in_view(&self.screen_offset, size, 2)
-                | !self
-                    .cursor_position
-                    .width_in_view(&self.screen_offset, size)
-            {
-                self.screen_offset.handle_offset_screen_snap(
-                    &self.cursor_position,
-                    size,
-                    2,
-                    buffer.len(),
-                );
+            // if out width is within 0 - size
+            // snap offset left
+            if self.cursor_position.width < size.width {
+                self.screen_offset.snap_left();
             }
+            match self
+                .cursor_position
+                .max_displacement_from_view(&self.screen_offset, &size, 3)
+            {
+                0_usize => {}
+                1_usize => {
+                    self.screen_offset
+                        .update_offset_single_move(&self.cursor_position, &size, 3)
+                }
+                _ => self.screen_offset.handle_offset_screen_snap(
+                    &self.cursor_position,
+                    &size,
+                    3,
+                    buffer.len(),
+                ),
+            }
+            /*
+                        if !self
+                            .cursor_position
+                            .height_in_view(&self.screen_offset, size, 2)
+                            | !self
+                                .cursor_position
+                                .width_in_view(&self.screen_offset, size)
+                        {
+                            self.screen_offset.handle_offset_screen_snap(
+                                &self.cursor_position,
+                                size,
+                                3,
+                                buffer.len(),
+                            );
+                        }
+            */
         }
         self.render(buffer, size);
     }
@@ -169,9 +191,9 @@ impl Search {
         if (size.width == 0) | (size.height == 0) {
             return;
         }
-        Terminal::hide_cursor().unwrap();
-        Terminal::move_cursor_to(self.screen_offset.to_position()).unwrap();
-        Terminal::clear_screen().unwrap();
+        Terminal::hide_cursor().expect("Terminal error");
+        Terminal::move_cursor_to(self.screen_offset.to_position()).expect("Terminal error");
+        Terminal::clear_screen().expect("Terminal error");
 
         #[allow(clippy::integer_division)]
         for current_row in self.screen_offset.height
@@ -183,14 +205,7 @@ impl Search {
         {
             let relative_row = current_row.saturating_sub(self.screen_offset.height);
             if self.line_indicies.contains(&current_row) {
-                self.render_search_line(
-                    current_row,
-                    buffer,
-                    &self.screen_offset,
-                    size,
-                    self.highlight,
-                    self.text,
-                );
+                self.render_search_line(current_row, buffer, size, self.highlight, self.text);
                 continue;
             }
 
@@ -203,29 +218,29 @@ impl Search {
                             ..self.screen_offset.width.saturating_add(size.width),
                     ),
                 )
-                .unwrap();
+                .expect("Terminal Error");
             } else {
-                Terminal::render_line(relative_row, "~").unwrap();
+                Terminal::render_line(relative_row, "~").expect("Terminal error");
             }
         }
 
         self.render_search_string(size);
         Terminal::render_status_line(
-            Mode::Search,
+            &Mode::Search,
             buffer.is_saved,
             size,
             buffer.filename.as_deref(),
             Some((self.cursor_position.height.saturating_add(1), buffer.len())),
         )
-        .unwrap();
+        .expect("Terminal Error");
 
         Terminal::move_cursor_to(
             self.cursor_position
                 .relative_view_position(&self.screen_offset),
         )
-        .unwrap();
-        Terminal::show_cursor().unwrap();
-        Terminal::execute().unwrap();
+        .expect("Terminal Error");
+        Terminal::show_cursor().expect("Terminal Error");
+        Terminal::execute().expect("Terminal Error");
     }
 
     #[inline]
@@ -235,10 +250,8 @@ impl Search {
     }
 
     fn find_relative_start(&self, curr_height: usize) -> Option<usize> {
-        // binary search to find the closest search result to pre search cursor position
-        // returns Some when there is a search result
-        // returns None otherwise
-        // None is a catch all, we should always have a closest position
+        // in the next verion, change this to have better cach locality for the search
+        // in most cases this probably does not matter
         let current_positions: Vec<Position> =
             match self.stack.get(self.stack.len().saturating_sub(1)) {
                 Some(positions) => positions.clone(),
@@ -281,6 +294,7 @@ impl Search {
             } else {
                 l = m.saturating_add(1);
             }
+
             m = (r - l) / 2 + l;
         }
         None
@@ -325,18 +339,15 @@ impl Search {
         }
     }
 
+    #[inline]
     fn render_search_line(
         &self,
         line: usize,
         buffer: &Buffer,
-        offset: &ScreenOffset,
         size: &Size,
         search_highlight: Color,
         search_text: Color,
     ) {
-        //grab the current lint
-        //style the search hit
-        //render the search hits and plain text
         let styled_search: StyledContent<String> = self
             .string
             .clone()
@@ -344,28 +355,35 @@ impl Search {
             .on(search_highlight)
             .attribute(Attribute::Bold);
 
-        Terminal::move_cursor_to(Position {
-            height: line.saturating_sub(offset.height),
+        Terminal::move_cursor_to(ScreenPosition {
+            height: line.saturating_sub(self.screen_offset.height),
             width: 0,
         })
-        .unwrap();
-        Terminal::clear_line().unwrap();
+        .expect("Terminal Error");
+        Terminal::clear_line().expect("Terminal Error");
 
-        let full_line = &buffer.text.get(line).unwrap().raw_string;
-        let start = offset.width;
-        let end = min(offset.width.saturating_add(size.width), full_line.len());
-        let current_line = full_line.get(start..end).unwrap();
+        let full_line = &buffer.text[line].raw_string;
+        let start = self.screen_offset.width;
+        let end = min(
+            self.screen_offset.width.saturating_add(size.width),
+            full_line.len(),
+        );
+        let current_line = match full_line.get(start..end) {
+            Some(text) => text,
+            None => return,
+        };
         let mut split = current_line.split(&self.string);
 
         if let Some(first) = split.next() {
             if !current_line.starts_with(&self.string) {
-                Terminal::queue_command(Print(first)).unwrap();
+                Terminal::queue_command(Print(first)).expect("Terminal Error");
             }
         };
 
-        while let Some(text) = split.next() {
-            Terminal::queue_command(PrintStyledContent(styled_search.clone())).unwrap();
-            Terminal::queue_command(Print(text)).unwrap();
+        for text in split {
+            Terminal::queue_command(PrintStyledContent(styled_search.clone()))
+                .expect("Terminal Error");
+            Terminal::queue_command(Print(text)).expect("Terminal Error");
         }
     }
 }
@@ -383,6 +401,7 @@ mod tests {
             positions.push(Position {
                 height: *i,
                 width: 0,
+                max_width: usize::default(),
             })
         }
         search.stack = vec![positions];

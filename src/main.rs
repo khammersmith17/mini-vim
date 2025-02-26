@@ -2,9 +2,7 @@
     clippy::all,
     clippy::pedantic,
     clippy::print_stdout,
-    clippy::arithmetic_side_effects,
-    clippy::as_conversions,
-    clippy::integer_division
+    clippy::as_conversions
 )]
 mod editor;
 use editor::terminal::Terminal;
@@ -14,15 +12,15 @@ fn main() {
     let loader = Editor::new();
     match loader {
         Ok(mut editor) => match editor.run() {
-            Ok(_) => {}
+            Ok(()) => {}
             Err(e) => {
                 let _ = Terminal::terminate();
-                println!("MiniVim Error:\n{}", e);
+                let _ = Terminal::print(format!("MiniVim Error:\n{e}"));
             }
         },
         Err(e) => {
             let _ = Terminal::terminate();
-            println!("MiniVim Error:\n{}", e);
+            let _ = Terminal::print(format!("MiniVim Error:\n{e}"));
         }
     }
 }

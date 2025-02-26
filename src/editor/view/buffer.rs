@@ -1,5 +1,5 @@
 use super::line::{GraphemeWidth, Line, TextFragment};
-use crate::editor::view::{Coordinate, Position};
+use crate::editor::view::Position;
 use std::fs::{read_to_string, OpenOptions};
 use std::io::{Error, LineWriter, Write};
 
@@ -75,7 +75,11 @@ impl Buffer {
             if line.raw_string.contains(search_str) {
                 let resulting_widths = self.find_search_widths(search_str, i);
                 for width in resulting_widths {
-                    positions.push(Position { width, height: i });
+                    positions.push(Position {
+                        width,
+                        height: i,
+                        max_width: 0_usize,
+                    });
                 }
             }
         }
@@ -102,8 +106,9 @@ impl Buffer {
         pos.width = if self.is_tab(&Position {
             height: pos.height,
             width: 4,
+            max_width: usize::default(),
         }) {
-            self.num_tabs(pos.height) * 4
+            self.num_tabs(pos.height).saturating_mul(4)
         } else {
             0
         };
@@ -217,7 +222,7 @@ impl Buffer {
             self.text.push(new_line);
         }
 
-        for _ in pos.width..pos.width.saturating_add(num_tabs * 4) {
+        for _ in pos.width..pos.width.saturating_add(num_tabs.saturating_mul(4)) {
             self.text
                 .get_mut(pos.height)
                 .expect("Out of bounds")
@@ -324,11 +329,10 @@ impl Buffer {
         let len = bytes.len();
         let mut i = 5;
         while i < len && bytes[i] == 32 {
-            i += 1;
+            i = i.saturating_add(1);
         }
 
-        let i = i >> 2; //cheaper divide by 4 and get integer divide free
-        i
+        i >> 2 //cheaper divide by 4 and get integer divide free
     }
 
     fn new_line(&mut self, line_index: usize) {
@@ -349,12 +353,14 @@ impl Buffer {
         if self.is_tab(&Position {
             height: line_index,
             width: 4,
+            max_width: usize::default(),
         }) {
             let num_tabs = self.num_tabs(line_index);
             self.insert_tab(
                 &Position {
                     height: line_index.saturating_add(1),
                     width: 0,
+                    max_width: usize::default(),
                 },
                 num_tabs,
             );
@@ -535,6 +541,7 @@ mod tests {
         let mut pos = Position {
             height: 0,
             width: 3,
+            max_width: usize::default(),
         };
 
         buff.end_of_current_word(&mut pos);
@@ -543,7 +550,8 @@ mod tests {
             pos,
             Position {
                 height: 0,
-                width: 5
+                width: 5,
+                max_width: usize::default()
             }
         );
     }
@@ -562,6 +570,7 @@ mod tests {
         let mut pos = Position {
             height: 0,
             width: 22,
+            max_width: usize::default(),
         };
         buff.end_of_current_word(&mut pos);
 
@@ -569,7 +578,9 @@ mod tests {
             pos,
             Position {
                 height: 1,
-                width: 3
+                width: 3,
+
+                max_width: usize::default()
             }
         );
     }
@@ -588,6 +599,8 @@ mod tests {
         let mut pos = Position {
             height: 1,
             width: 22,
+
+            max_width: usize::default(),
         };
         buff.end_of_current_word(&mut pos);
 
@@ -595,7 +608,9 @@ mod tests {
             pos,
             Position {
                 height: 1,
-                width: 24
+                width: 24,
+
+                max_width: usize::default()
             }
         );
     }
@@ -614,6 +629,8 @@ mod tests {
         let mut pos = Position {
             height: 0,
             width: 4,
+
+            max_width: usize::default(),
         };
         buff.begining_of_current_word(&mut pos);
 
@@ -621,7 +638,9 @@ mod tests {
             pos,
             Position {
                 height: 0,
-                width: 2
+                width: 2,
+
+                max_width: usize::default()
             }
         );
     }
@@ -640,6 +659,8 @@ mod tests {
         let mut pos = Position {
             height: 0,
             width: 2,
+
+            max_width: usize::default(),
         };
         buff.begining_of_current_word(&mut pos);
 
@@ -647,7 +668,9 @@ mod tests {
             pos,
             Position {
                 height: 0,
-                width: 0
+                width: 0,
+
+                max_width: usize::default()
             }
         );
     }

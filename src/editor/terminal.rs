@@ -15,20 +15,18 @@ pub struct Size {
     pub width: usize,
 }
 
-///trait for Position and ScreenOffset struct
-///for structs that represent some sort of coordinate
+#[derive(Copy, Clone, Default, Debug)]
+pub struct ScreenPosition {
+    pub height: usize,
+    pub width: usize,
+}
+
+//trait for 'Position' and 'ScreenOffset' struct
+//for structs that represent some sort of coordinate
 pub trait Coordinate {
     fn set_width(&mut self, _val: usize) {}
 
     fn set_height(&mut self, _val: usize) {}
-
-    fn left(&mut self, _delta: usize) {}
-
-    fn up(&mut self, _delta: usize) {}
-
-    fn right(&mut self, _delta: usize, _max: usize) {}
-
-    fn down(&mut self, _delta: usize, _max: usize) {}
 
     fn page_up(&mut self) {}
 
@@ -55,13 +53,21 @@ pub trait Coordinate {
     fn snap_left(&mut self) {}
 }
 
-#[derive(Copy, Clone, Default, Eq, PartialEq, Debug)]
+#[derive(Copy, Clone, Default, Eq, Debug)]
 pub struct Position {
     pub width: usize,
     pub height: usize,
+    pub max_width: usize,
 }
 
-// inlining all methods here as they are straight forward computations
+impl PartialEq for Position {
+    fn eq(&self, rhs: &Position) -> bool {
+        // only evaluate the position data not the max_width
+        self.width == rhs.width && self.height == rhs.height
+    }
+}
+
+// inlining methods here as they will be hot as the cursor move should be a common instruction
 impl Coordinate for Position {
     #[inline]
     fn set_width(&mut self, val: usize) {
@@ -71,26 +77,6 @@ impl Coordinate for Position {
     #[inline]
     fn set_height(&mut self, val: usize) {
         self.height = val;
-    }
-
-    #[inline]
-    fn left(&mut self, delta: usize) {
-        self.width = self.width.saturating_sub(delta);
-    }
-
-    #[inline]
-    fn up(&mut self, delta: usize) {
-        self.height = self.height.saturating_sub(delta);
-    }
-
-    #[inline]
-    fn right(&mut self, delta: usize, max: usize) {
-        self.width = std::cmp::min(self.width.saturating_add(delta), max);
-    }
-
-    #[inline]
-    fn down(&mut self, delta: usize, max: usize) {
-        self.height = std::cmp::min(self.height.saturating_add(delta), max);
     }
 
     fn page_up(&mut self) {
@@ -127,11 +113,40 @@ impl Coordinate for Position {
 }
 
 impl Position {
+    pub fn to_screen_position(self) -> ScreenPosition {
+        ScreenPosition {
+            height: self.height,
+            width: self.width,
+        }
+    }
+
     pub fn diff_height(&self, other: &Position) -> usize {
         if self.height > other.height {
-            return self.height - other.height;
+            return self.height.saturating_sub(other.height);
         }
-        other.height - self.height
+        other.height.saturating_sub(self.height)
+    }
+
+    #[inline]
+    pub fn left(&mut self, delta: usize) {
+        self.width = self.width.saturating_sub(delta);
+        self.max_width = self.max_width.saturating_sub(1);
+    }
+
+    #[inline]
+    pub fn right(&mut self, delta: usize, max: usize) {
+        self.width = std::cmp::min(self.width.saturating_add(delta), max);
+        self.max_width = self.max_width.saturating_add(1);
+    }
+
+    #[inline]
+    pub fn up(&mut self, delta: usize) {
+        self.height = self.height.saturating_sub(delta);
+    }
+
+    #[inline]
+    pub fn down(&mut self, delta: usize, max: usize) {
+        self.height = std::cmp::min(self.height.saturating_add(delta), max);
     }
 
     pub fn set_position(&mut self, new: Position) {
@@ -147,16 +162,23 @@ impl Position {
         reserved_lines: usize,
     ) -> usize {
         let width_displacement: usize = if self.width < offset.width {
-            offset.width - self.width
-        } else if self.width >= offset.width + size.width {
-            self.width - offset.width + size.width
+            offset.width.saturating_sub(self.width)
+        } else if self.width >= offset.width.saturating_add(size.width) {
+            self.width
+                .saturating_sub(offset.width)
+                .saturating_add(size.width)
         } else {
             0_usize
         };
+
+        let cutoff: usize = offset
+            .height
+            .saturating_add(size.height)
+            .saturating_sub(reserved_lines);
         let height_displacement: usize = if self.height < offset.height {
-            offset.height - self.height
-        } else if self.height >= offset.height + size.height - reserved_lines {
-            self.height - (offset.height + size.height - reserved_lines)
+            offset.height.saturating_sub(self.height)
+        } else if self.height >= cutoff {
+            self.height.saturating_sub(cutoff)
         } else {
             0_usize
         };
@@ -164,63 +186,36 @@ impl Position {
         std::cmp::max(height_displacement, width_displacement)
     }
 
-    #[inline(always)] //this is called on every render, very hot
-    pub fn relative_view_position(&self, offset: &ScreenOffset) -> Position {
-        Position {
+    #[inline] //this is called on every render, very hot
+    pub fn relative_view_position(&self, offset: &ScreenOffset) -> ScreenPosition {
+        ScreenPosition {
             height: self.height.saturating_sub(offset.height),
             width: self.width.saturating_sub(offset.width),
         }
     }
 
     pub fn right_of_view(&self, offset: &ScreenOffset, size: &Size) -> bool {
-        if self.width > offset.width + size.width {
-            return true;
-        }
-        false
+        self.width > offset.width.saturating_add(size.width)
     }
 
     pub fn left_of_view(&self, offset: &ScreenOffset) -> bool {
-        if self.width < offset.width {
-            return true;
-        }
-        false
-    }
-
-    pub fn width_in_view(&self, offset: &ScreenOffset, size: &Size) -> bool {
-        if self.left_of_view(offset) | self.right_of_view(offset, size) {
-            return false;
-        }
-        true
-    }
-
-    pub fn height_in_view(
-        &self,
-        offset: &ScreenOffset,
-        size: &Size,
-        reserved_lines: usize,
-    ) -> bool {
-        if self.above_view(offset) | self.below_view(offset, size, reserved_lines) {
-            return false;
-        }
-        true
+        self.width < offset.width
     }
 
     pub fn above_view(&self, offset: &ScreenOffset) -> bool {
-        if self.height < offset.height {
-            return true;
-        }
-        false
+        self.height < offset.height
     }
 
     pub fn below_view(&self, offset: &ScreenOffset, size: &Size, reserved_lines: usize) -> bool {
-        if self.height >= offset.height + size.height.saturating_sub(reserved_lines) {
-            return true;
-        }
-        false
+        self.height
+            >= offset
+                .height
+                .saturating_add(size.height.saturating_sub(reserved_lines))
     }
 
+    #[inline]
     pub fn resolve_width(&mut self, max: usize) {
-        self.width = std::cmp::min(self.width, max);
+        self.width = std::cmp::min(self.max_width, max);
     }
 }
 
@@ -231,8 +226,8 @@ pub struct ScreenOffset {
 }
 
 impl ScreenOffset {
-    pub fn to_position(&self) -> Position {
-        Position {
+    pub fn to_position(self) -> ScreenPosition {
+        ScreenPosition {
             height: self.height,
             width: self.width,
         }
@@ -246,15 +241,19 @@ impl ScreenOffset {
         buffer_len: usize,
     ) {
         // updates the offset when offset adjustment is > 1
-        if pos.below_view(&*self, size, reserved) {
+        if pos.below_view(self, size, reserved) {
             self.set_height(std::cmp::min(
-                buffer_len.saturating_sub(size.height).saturating_add(2), // leave space for the file info line
-                pos.height.saturating_sub(size.height).saturating_add(2),
+                buffer_len
+                    .saturating_sub(size.height)
+                    .saturating_add(reserved), // leave space for the file info line
+                pos.height
+                    .saturating_sub(size.height)
+                    .saturating_add(reserved),
             ));
             if reserved > 1 {
                 self.set_height(self.height.saturating_add(1));
             }
-        } else if pos.above_view(&*self) {
+        } else if pos.above_view(self) {
             self.set_height(pos.height.saturating_sub(1));
         }
 
@@ -266,7 +265,7 @@ impl ScreenOffset {
             self.snap_left();
         }
 
-        if pos.width >= size.width + self.width {
+        if pos.width >= size.width.saturating_add(self.width) {
             self.width = pos.width.saturating_sub(size.width).saturating_add(1);
         } else if pos.width < self.width {
             self.width = pos.width;
@@ -275,22 +274,24 @@ impl ScreenOffset {
 
     pub fn update_offset_single_move(&mut self, pos: &Position, size: &Size, reserved: usize) {
         //if cursor moves beyond height + offset -> increment height offset
-        if pos.below_view(&*self, size, reserved) {
+        if pos.below_view(self, size, reserved) {
             self.set_height(std::cmp::min(
                 self.height.saturating_add(1),
-                pos.height.saturating_sub(size.height).saturating_add(2), // space for file info line
+                pos.height
+                    .saturating_sub(size.height)
+                    .saturating_add(reserved), // space for file info line
             ));
         }
         // if height moves less than the offset -> decrement height
-        if pos.above_view(&*self) {
+        if pos.above_view(self) {
             self.set_height(pos.height);
         }
         //if widith less than offset -> decerement width
-        if pos.left_of_view(&*self) {
+        if pos.left_of_view(self) {
             self.set_width(pos.width);
         }
         //if width moves outside view by 1 increment
-        if pos.right_of_view(&*self, size) {
+        if pos.right_of_view(self, size) {
             //self.screen_offset.width = self.screen_offset.width.saturating_sub(1);
             self.width = self.width.saturating_add(1);
         }
@@ -305,22 +306,6 @@ impl Coordinate for ScreenOffset {
 
     fn set_height(&mut self, val: usize) {
         self.height = val;
-    }
-
-    fn left(&mut self, delta: usize) {
-        self.width = self.width.saturating_sub(delta);
-    }
-
-    fn up(&mut self, delta: usize) {
-        self.height = self.height.saturating_sub(delta);
-    }
-
-    fn right(&mut self, delta: usize, max: usize) {
-        self.width = std::cmp::min(self.width.saturating_add(delta), max);
-    }
-
-    fn down(&mut self, delta: usize, max: usize) {
-        self.height = std::cmp::min(self.height.saturating_add(delta), max);
     }
 
     fn page_up(&mut self) {
@@ -364,7 +349,7 @@ pub struct Location {
 
 pub enum Mode {
     Insert,
-    VimMode,
+    Vim,
     Search,
     Highlight,
 }
@@ -373,7 +358,7 @@ impl Mode {
     pub fn to_string(&self) -> &str {
         match *self {
             Self::Insert => "Insert",
-            Self::VimMode => "Vim",
+            Self::Vim => "Vim",
             Self::Search => "Search",
             Self::Highlight => "Highlight",
         }
@@ -424,7 +409,7 @@ impl Terminal {
         Self::queue_command(Clear(ClearType::CurrentLine))?;
         Ok(())
     }
-    pub fn move_cursor_to(position: Position) -> Result<(), Error> {
+    pub fn move_cursor_to(position: ScreenPosition) -> Result<(), Error> {
         #[allow(clippy::as_conversions, clippy::cast_possible_truncation)]
         Self::queue_command(MoveTo(position.width as u16, position.height as u16))?;
         Ok(())
@@ -442,7 +427,7 @@ impl Terminal {
     }
 
     pub fn render_line<T: std::fmt::Display>(row: usize, line: T) -> Result<(), Error> {
-        Terminal::move_cursor_to(Position {
+        Terminal::move_cursor_to(ScreenPosition {
             width: 0,
             height: row,
         })?;
@@ -488,7 +473,7 @@ impl Terminal {
 
     #[inline]
     pub fn render_status_line(
-        mode: Mode,
+        mode: &Mode,
         saved: bool,
         size: &Size,
         filename: Option<&str>,
@@ -554,6 +539,7 @@ mod test {
         let pos1 = Position {
             height: 12,
             width: 12,
+            max_width: usize::default(),
         };
 
         assert_eq!(pos1.max_displacement_from_view(&offset1, &size1, 1), 0);
@@ -573,6 +559,8 @@ mod test {
         let pos1 = Position {
             height: 0,
             width: 12,
+
+            max_width: usize::default(),
         };
 
         assert_eq!(pos1.max_displacement_from_view(&offset1, &size1, 1), 1);
@@ -592,6 +580,8 @@ mod test {
         let pos1 = Position {
             height: 0,
             width: 12,
+
+            max_width: usize::default(),
         };
 
         assert_eq!(pos1.max_displacement_from_view(&offset1, &size1, 1), 2);
@@ -611,6 +601,8 @@ mod test {
         let pos1 = Position {
             height: 0,
             width: 12,
+
+            max_width: usize::default(),
         };
 
         assert_eq!(pos1.max_displacement_from_view(&offset1, &size1, 1), 1);
@@ -630,6 +622,7 @@ mod test {
         let pos1 = Position {
             height: 0,
             width: 0,
+            max_width: usize::default(),
         };
 
         assert_eq!(pos1.max_displacement_from_view(&offset1, &size1, 1), 2);
@@ -649,6 +642,7 @@ mod test {
         let pos1 = Position {
             height: 0,
             width: 6,
+            max_width: usize::default(),
         };
 
         assert_eq!(pos1.max_displacement_from_view(&offset1, &size1, 1), 9);

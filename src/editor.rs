@@ -28,7 +28,7 @@ impl Editor {
         let args: Vec<String> = args().collect();
         let mut view = View::default();
         if let Some(filename) = args.get(1) {
-            if !view.load(filename).is_ok() {
+            if view.load(filename).is_err() {
                 return Err(Error::new(
                     ErrorKind::InvalidInput,
                     format!("{filename} is a directory"),
@@ -53,13 +53,10 @@ impl Editor {
             */
             match read() {
                 Ok(event) => {
-                    if let Ok(cont) = self.evaluate_event(event) {
-                        if !cont {
-                            break;
-                        }
+                    let cont = self.evaluate_event(event)?;
+                    if !cont {
+                        break;
                     }
-
-                    //silencing errors here, users will just see nothing happen
                 }
                 Err(err) => {
                     #[cfg(debug_assertions)]
@@ -100,12 +97,11 @@ impl Editor {
                             }
                         }
                         return Ok(false);
-                    } else {
-                        // process the event
-                        // handle is any downtream commands quit the session
-                        if let Ok(should_continue) = self.view.handle_event(command) {
-                            return Ok(should_continue);
-                        }
+                    }
+                    // process the event
+                    // handle is any downtream commands quit the session
+                    if let Ok(should_continue) = self.view.handle_event(command) {
+                        return Ok(should_continue);
                     }
                 }
                 Err(err) => {

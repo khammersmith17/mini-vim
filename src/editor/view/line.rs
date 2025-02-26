@@ -7,9 +7,9 @@ use unicode_width::UnicodeWidthStr;
 const UPPERCASE_ASCII_RANGE: RangeInclusive<u8> = 65..=90;
 const LOWERCASE_ASCII_RANGE: RangeInclusive<u8> = 97..=122;
 
-fn is_alpha(val: &u8) -> bool {
+fn is_alpha(val: u8) -> bool {
     // including underscores here
-    UPPERCASE_ASCII_RANGE.contains(val) || LOWERCASE_ASCII_RANGE.contains(val) || *val == 95
+    UPPERCASE_ASCII_RANGE.contains(&val) || LOWERCASE_ASCII_RANGE.contains(&val) || val == 95
 }
 
 #[derive(PartialEq, Clone, Debug)]
@@ -46,23 +46,22 @@ impl TryFrom<&str> for TextFragment {
         let replacement = match width {
             0 => {
                 let trimmed = new_item.trim();
-                match trimmed {
-                    "\t" => Some(' '),
-                    _ => {
-                        let control = trimmed
-                            .chars()
-                            .map(char::is_control)
-                            .reduce(|a, b| a | b)
-                            .expect("Error in reduction");
-                        let replace_val = if control {
-                            '|'
-                        } else if trimmed.is_empty() {
-                            '*'
-                        } else {
-                            '.'
-                        };
-                        Some(replace_val)
-                    }
+                if trimmed == "\t" {
+                    Some(' ')
+                } else {
+                    let control = trimmed
+                        .chars()
+                        .map(char::is_control)
+                        .reduce(|a, b| a | b)
+                        .expect("Error in reduction");
+                    let replace_val = if control {
+                        '|'
+                    } else if trimmed.is_empty() {
+                        '*'
+                    } else {
+                        '.'
+                    };
+                    Some(replace_val)
                 }
             }
             _ => None,
@@ -115,11 +114,10 @@ impl Line {
             .string
             .iter()
             .map(|fragment| match fragment.render_width {
-                GraphemeWidth::Full => 2,
-                GraphemeWidth::Half => 1,
+                GraphemeWidth::Full => 2usize,
+                GraphemeWidth::Half => 1usize,
             })
-            .reduce(|a, b| a + b)
-            .expect("Error in reduce");
+            .sum::<usize>();
 
         len
     }
@@ -132,7 +130,7 @@ impl Line {
 
         for (i, c) in self.raw_string.as_bytes().iter().skip(start).enumerate() {
             space_pos = i.saturating_add(start);
-            if !is_alpha(&c) {
+            if !is_alpha(*c) {
                 break;
             }
         }
@@ -145,7 +143,7 @@ impl Line {
             .skip(space_pos)
             .enumerate()
         {
-            if !is_alpha(&c) {
+            if !is_alpha(*c) {
                 return Some(i.saturating_add(space_pos));
             }
         }
@@ -158,12 +156,12 @@ impl Line {
             return None;
         }
         let chars = self.raw_string.as_bytes();
-        if !is_alpha(&chars[0]) {
+        if !is_alpha(chars[0]) {
             return Some(0);
         }
 
         for (i, c) in chars.iter().skip(1).enumerate() {
-            if !is_alpha(c) {
+            if !is_alpha(*c) {
                 return Some(i.saturating_add(1));
             }
         }
@@ -179,7 +177,7 @@ impl Line {
         let mut pos = start;
         for c in self.raw_string.as_bytes()[..start].iter().rev() {
             pos = pos.saturating_sub(1);
-            if !is_alpha(c) {
+            if !is_alpha(*c) {
                 break;
             }
         }
@@ -191,7 +189,7 @@ impl Line {
         pos = pos.saturating_sub(1);
         for c in self.raw_string.as_bytes()[..pos].iter().rev() {
             pos = pos.saturating_sub(1);
-            if !is_alpha(c) {
+            if !is_alpha(*c) {
                 return Some(pos.saturating_add(1));
             }
         }
@@ -205,11 +203,11 @@ impl Line {
         }
         let len = self.raw_string.len().saturating_sub(1);
         let bytes = self.raw_string.as_bytes();
-        if !is_alpha(&bytes[len]) {
+        if !is_alpha(bytes[len]) {
             return Some(len);
         }
         for (i, c) in bytes.iter().rev().enumerate().skip(1) {
-            if !is_alpha(c) {
+            if !is_alpha(*c) {
                 return Some(i.saturating_sub(1));
             }
         }
@@ -225,29 +223,29 @@ impl Line {
         // then find the next alpha char
         // if neither are satisfied -> None
         let bytes = self.raw_string.as_bytes();
-        if is_alpha(&bytes[pos]) {
+        if is_alpha(bytes[pos]) {
             // currently at alpha char
             // find next non alpha char
-            let Some(next) = self.forward_from_alpha(pos, bytes) else {
+            let Some(next) = Self::forward_from_alpha(pos, bytes) else {
                 return None;
             };
 
-            let new = self.forward_from_non_alpha(next, bytes);
+            let new = Self::forward_from_non_alpha(next, bytes);
             if new.is_some() {
-                return new;
+                new
             } else {
-                return None;
+                None
             }
         } else {
-            let Some(next) = self.forward_from_non_alpha(pos, bytes) else {
+            let Some(next) = Self::forward_from_non_alpha(pos, bytes) else {
                 return None;
             };
 
-            let new = self.forward_from_alpha(next, bytes);
+            let new = Self::forward_from_alpha(next, bytes);
             if new.is_some() {
-                return new;
+                new
             } else {
-                return None;
+                None
             }
         }
     }
@@ -257,22 +255,22 @@ impl Line {
         if self.is_empty() {
             return None;
         }
-        if is_alpha(&bytes[0]) {
+        if is_alpha(bytes[0]) {
             return Some(0);
         }
 
-        if let Some(new) = self.forward_from_non_alpha(0, bytes) {
+        if let Some(new) = Self::forward_from_non_alpha(0, bytes) {
             return Some(new.saturating_sub(1));
         }
         None
     }
 
     #[inline]
-    fn forward_from_alpha(&self, pos: usize, str_bytes: &[u8]) -> Option<usize> {
+    fn forward_from_alpha(pos: usize, str_bytes: &[u8]) -> Option<usize> {
         // find next non alpha char
         // if not found -> None
         for (i, c) in str_bytes[pos..].iter().enumerate() {
-            if !is_alpha(c) {
+            if !is_alpha(*c) {
                 return Some(pos.saturating_add(i));
             }
         }
@@ -280,9 +278,9 @@ impl Line {
     }
 
     #[inline]
-    fn forward_from_non_alpha(&self, pos: usize, str_bytes: &[u8]) -> Option<usize> {
+    fn forward_from_non_alpha(pos: usize, str_bytes: &[u8]) -> Option<usize> {
         for (i, c) in str_bytes[pos..].iter().enumerate() {
-            if is_alpha(c) {
+            if is_alpha(*c) {
                 return Some(pos.saturating_add(i));
             }
         }
@@ -296,15 +294,14 @@ impl Line {
         // find the next alpha then find the next non alpha
         let len: usize = self.raw_string.len().saturating_sub(1);
         let bytes = self.raw_string.as_bytes();
-        if is_alpha(&bytes[len]) {
-            if let Some(new) = self.backward_from_alpha(len, bytes) {
+        if is_alpha(bytes[len]) {
+            if let Some(new) = Self::backward_from_alpha(len, bytes) {
                 return Some(new.saturating_add(1));
             }
-        } else {
-            if let Some(new) = self.backward_from_non_alpha(len, bytes) {
-                return Some(new.saturating_add(1));
-            }
+        } else if let Some(new) = Self::backward_from_non_alpha(len, bytes) {
+            return Some(new.saturating_add(1));
         }
+
         None
     }
 
@@ -323,12 +320,12 @@ impl Line {
         // if the current pos an alphabet char and is the char to the lest if a current alphabet
         // char
         match (
-            is_alpha(&bytes[pos]),
-            pos > 0 && is_alpha(&bytes[pos.saturating_sub(1)]),
+            is_alpha(bytes[pos]),
+            pos > 0 && is_alpha(bytes[pos.saturating_sub(1)]),
         ) {
             (true, true) => {
                 // look for next non alpha char
-                if let Some(new) = self.backward_from_alpha(pos, bytes) {
+                if let Some(new) = Self::backward_from_alpha(pos, bytes) {
                     return Some(new.saturating_add(1));
                 }
                 None
@@ -338,15 +335,15 @@ impl Line {
                 // start at 1 left
                 // find the next alpha char
                 let Some(next_left_alpha) =
-                    self.backward_from_non_alpha(pos.saturating_sub(1), bytes)
+                    Self::backward_from_non_alpha(pos.saturating_sub(1), bytes)
                 else {
                     return None;
                 };
 
-                if let Some(new_pos) = self.backward_from_alpha(next_left_alpha, bytes) {
+                if let Some(new_pos) = Self::backward_from_alpha(next_left_alpha, bytes) {
                     return Some(new_pos.saturating_add(1));
                 }
-                if is_alpha(&bytes[0]) {
+                if is_alpha(bytes[0]) {
                     Some(0)
                 } else {
                     None
@@ -355,10 +352,10 @@ impl Line {
             _ => {
                 // find next alpha
                 // find next non alpha
-                let Some(temp) = self.backward_from_non_alpha(pos, bytes) else {
+                let Some(temp) = Self::backward_from_non_alpha(pos, bytes) else {
                     return None;
                 };
-                if let Some(new) = self.backward_from_alpha(pos, bytes) {
+                if let Some(new) = Self::backward_from_alpha(pos, bytes) {
                     return Some(new.saturating_add(1));
                 }
                 Some(temp)
@@ -380,34 +377,33 @@ impl Line {
         // making sure we are not ad the current end
         // if the current char is an alphabet char and checking the char to the right
         let new: Option<usize> = match (
-            is_alpha(&bytes[pos]),
-            pos < self.raw_string.len().saturating_sub(1)
-                && is_alpha(&bytes[pos.saturating_add(1)]),
+            is_alpha(bytes[pos]),
+            pos < self.raw_string.len().saturating_sub(1) && is_alpha(bytes[pos.saturating_add(1)]),
         ) {
             (true, true) => {
                 // find next non alpha and return pos - 1
-                self.forward_from_alpha(pos, bytes)
+                Self::forward_from_alpha(pos, bytes)
             }
             (true, false) => {
                 // find next alpha from pos + 1, then next non alpha
-                if let Some(temp) = self.forward_from_non_alpha(pos.saturating_add(1), bytes) {
-                    self.forward_from_alpha(temp, bytes)
+                if let Some(temp) = Self::forward_from_non_alpha(pos.saturating_add(1), bytes) {
+                    Self::forward_from_alpha(temp, bytes)
                 } else {
                     None
                 }
             }
-            (false, true) => self.forward_from_alpha(pos.saturating_add(1), bytes),
+            (false, true) => Self::forward_from_alpha(pos.saturating_add(1), bytes),
             _ => {
-                if let Some(temp) = self.forward_from_non_alpha(pos, bytes) {
-                    self.forward_from_alpha(temp, bytes)
+                if let Some(temp) = Self::forward_from_non_alpha(pos, bytes) {
+                    Self::forward_from_alpha(temp, bytes)
                 } else {
                     None
                 }
             }
         };
 
-        if new.is_some() {
-            return Some(new.unwrap().saturating_sub(1));
+        if let Some(new_pos) = new {
+            return Some(new_pos.saturating_sub(1));
         }
 
         None
@@ -420,24 +416,24 @@ impl Line {
         let bytes = self.raw_string.as_bytes();
         let mut pos = 0;
 
-        if !is_alpha(&bytes[0]) {
-            if let Some(new) = self.forward_from_non_alpha(pos, bytes) {
+        if !is_alpha(bytes[0]) {
+            if let Some(new) = Self::forward_from_non_alpha(pos, bytes) {
                 pos = new;
             } else {
                 return None;
             }
         }
-        if let Some(new) = self.forward_from_alpha(pos, bytes) {
+        if let Some(new) = Self::forward_from_alpha(pos, bytes) {
             return Some(new.saturating_sub(1));
         }
         None
     }
 
     #[inline]
-    fn backward_from_alpha(&self, pos: usize, str_bytes: &[u8]) -> Option<usize> {
+    fn backward_from_alpha(pos: usize, str_bytes: &[u8]) -> Option<usize> {
         // iterate backward to find the first non alpha char left
         for (i, c) in str_bytes[..pos].iter().rev().enumerate() {
-            if !is_alpha(c) {
+            if !is_alpha(*c) {
                 return Some(pos.saturating_sub(i).saturating_sub(1));
             }
         }
@@ -445,10 +441,10 @@ impl Line {
     }
 
     #[inline]
-    fn backward_from_non_alpha(&self, pos: usize, str_bytes: &[u8]) -> Option<usize> {
+    fn backward_from_non_alpha(pos: usize, str_bytes: &[u8]) -> Option<usize> {
         // iterate backward to find first
         for (i, c) in str_bytes[..pos].iter().rev().enumerate() {
-            if is_alpha(c) {
+            if is_alpha(*c) {
                 return Some(pos.saturating_sub(i).saturating_sub(1));
             }
         }
@@ -467,23 +463,22 @@ impl Line {
                 let replacement = match line_width {
                     0 => {
                         let trimmed = grapheme.trim();
-                        match trimmed {
-                            "\t" => Some(' '),
-                            _ => {
-                                let control = trimmed
-                                    .chars()
-                                    .map(char::is_control)
-                                    .reduce(|a, b| a | b)
-                                    .expect("Error in reduction");
-                                let replace_val = if control {
-                                    '|'
-                                } else if trimmed.is_empty() {
-                                    '*'
-                                } else {
-                                    '.'
-                                };
-                                Some(replace_val)
-                            }
+                        if trimmed == "\t" {
+                            Some(' ')
+                        } else {
+                            let control = trimmed
+                                .chars()
+                                .map(char::is_control)
+                                .reduce(|a, b| a | b)
+                                .expect("Error in reduction");
+                            let replace_val = if control {
+                                '|'
+                            } else if trimmed.is_empty() {
+                                '*'
+                            } else {
+                                '.'
+                            };
+                            Some(replace_val)
                         }
                     }
                     _ => None,
@@ -533,9 +528,9 @@ mod tests {
         let bytes = line.raw_string.as_bytes();
         // testing next non alpha
         // starting at u, trying to get to ':'
-        assert_eq!(line.forward_from_alpha(10, bytes).unwrap(), 14);
+        assert_eq!(Line::forward_from_alpha(10, bytes).unwrap(), 14);
         // starting at : and trying to get to t
-        assert_eq!(line.forward_from_non_alpha(14, bytes).unwrap(), 16);
+        assert_eq!(Line::forward_from_non_alpha(14, bytes).unwrap(), 16);
     }
 
     #[test]
@@ -554,8 +549,8 @@ mod tests {
         let line = Line::from("I have a bunch: of text. variable_name too");
         let bytes = line.raw_string.as_bytes();
 
-        assert_eq!(line.backward_from_alpha(12, bytes), Some(8));
-        assert_eq!(line.backward_from_non_alpha(15, bytes), Some(13));
+        assert_eq!(Line::backward_from_alpha(12, bytes), Some(8));
+        assert_eq!(Line::backward_from_non_alpha(15, bytes), Some(13));
     }
 
     #[test]

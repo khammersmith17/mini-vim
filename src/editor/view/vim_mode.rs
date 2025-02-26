@@ -30,12 +30,12 @@ pub struct VimMode<'a> {
 }
 
 impl VimMode<'_> {
-    pub fn new<'a>(
+    pub fn new(
         cursor_position: Position,
         screen_offset: ScreenOffset,
         size: Size,
-        buffer: &'a mut Buffer, // mutable reference to buffer
-    ) -> VimMode<'a> {
+        buffer: &'_ mut Buffer, // mutable reference to buffer
+    ) -> VimMode<'_> {
         VimMode {
             cursor_position,
             screen_offset,
@@ -88,10 +88,10 @@ impl VimMode<'_> {
                         needs_render = true;
                     }
                     VimModeCommands::StartOfNextWord => {
-                        self.buffer.begining_of_next_word(&mut self.cursor_position)
+                        self.buffer.begining_of_next_word(&mut self.cursor_position);
                     }
                     VimModeCommands::EndOfCurrentWord => {
-                        self.buffer.end_of_current_word(&mut self.cursor_position)
+                        self.buffer.end_of_current_word(&mut self.cursor_position);
                     }
                     VimModeCommands::BeginingOfCurrentWord => self
                         .buffer
@@ -99,14 +99,14 @@ impl VimMode<'_> {
                     VimModeCommands::ComplexCommand(queue_command) => {
                         // if we get true back, staying in vim mode
                         // else user is exiting the session
-                        match self.determine_queue_command(queue_command) {
+                        match self.determine_queue_command(&queue_command) {
                             ContinueState::ContinueVimPersistError => continue,
                             ContinueState::ContinueVim => {
                                 needs_render = true;
                             } // no action
                             ContinueState::InvalidCommand => {
                                 // if the command is invalid, render the help
-                                VimHelpScreen::render_help(&mut self.size, h_color, t_color)
+                                VimHelpScreen::render_help(&mut self.size, h_color, t_color);
                             }
                             ContinueState::JumpCursor(line) => {
                                 if self.jump_cursor_to(line) > 0 {
@@ -121,7 +121,7 @@ impl VimMode<'_> {
                             &mut self.cursor_position,
                             self.screen_offset,
                             &mut self.size,
-                            &mut self.buffer,
+                            self.buffer,
                         );
                         highlight.run(h_color, t_color, parse_highlight_vim_mode);
                         if self.resolve_displacement() > 0 {
@@ -220,7 +220,7 @@ impl VimMode<'_> {
     #[inline]
     fn status_line(&self) -> Result<(), Box<dyn Error>> {
         Terminal::render_status_line(
-            Mode::VimMode,
+            &Mode::Vim,
             self.buffer.is_saved,
             &self.size,
             self.buffer.filename.as_deref(),
@@ -276,7 +276,7 @@ impl VimMode<'_> {
     }
 
     // handing back view delta
-    #[inline(always)]
+    #[inline]
     fn move_cursor(&mut self, dir: Direction) -> usize {
         if self.buffer.is_empty() {
             self.cursor_position.snap_left();
@@ -291,22 +291,26 @@ impl VimMode<'_> {
         let dis =
             self.cursor_position
                 .max_displacement_from_view(&self.screen_offset, &self.size, 2);
-        if dis == 1 {
-            self.screen_offset
-                .update_offset_single_move(&self.cursor_position, &self.size, 1);
-        } else if dis > 1 {
-            self.screen_offset.handle_offset_screen_snap(
-                &self.cursor_position,
-                &self.size,
-                1,
-                self.buffer.len(),
-            );
+        match dis {
+            0 => {}
+            1 => {
+                self.screen_offset
+                    .update_offset_single_move(&self.cursor_position, &self.size, 1);
+            }
+            _ => {
+                self.screen_offset.handle_offset_screen_snap(
+                    &self.cursor_position,
+                    &self.size,
+                    1,
+                    self.buffer.len(),
+                );
+            }
         }
         dis
     }
 
     #[inline]
-    fn determine_queue_command(&mut self, command: QueueInitCommand) -> ContinueState {
+    fn determine_queue_command(&mut self, command: &QueueInitCommand) -> ContinueState {
         // propogate up the result of the typed command
         // otherwise we are staying in terminal session, thus true
         match command {
@@ -373,7 +377,7 @@ impl VimMode<'_> {
                             continue;
                         };
                         // execute action
-                        return self.eval_colon_queue(mapped);
+                        return self.eval_colon_queue(&mapped);
                     }
                     VimColonQueue::Resize(size) => self.resize(size),
                     VimColonQueue::Other => continue,
@@ -391,7 +395,7 @@ impl VimMode<'_> {
         debug_assert!(render.is_ok() & flush.is_ok());
     }
 
-    fn eval_colon_queue(&mut self, queue: Vec<ColonQueueActions>) -> ContinueState {
+    fn eval_colon_queue(&mut self, queue: &[ColonQueueActions]) -> ContinueState {
         // return true if we are staying in vim mode after executing the command
         // false if we are ending our terminal session
         match queue.len() {
@@ -420,7 +424,7 @@ impl VimMode<'_> {
                 }
             },
             2 => {
-                match queue.as_slice() {
+                match queue {
                     [ColonQueueActions::Write, ColonQueueActions::Quit] => {
                         self.buffer.save();
                         // exit terminal session
@@ -485,7 +489,7 @@ impl VimMode<'_> {
 
     #[inline]
     fn move_and_resolve(&mut self, dir: Direction) -> usize {
-        dir.move_cursor(&mut self.cursor_position, &self.buffer);
+        dir.move_cursor(&mut self.cursor_position, self.buffer);
         self.resolve_displacement()
     }
 
@@ -503,13 +507,13 @@ impl VimMode<'_> {
         if let Event::Key(KeyEvent { code, .. }) = event {
             match code {
                 KeyCode::Char('w') => {
-                    let mut right = self.cursor_position.clone();
+                    let mut right = self.cursor_position;
                     self.buffer.begining_of_next_word(&mut right);
                     self.buffer
                         .delete_segment(&self.cursor_position, &mut right);
                 }
                 KeyCode::Char('b') => {
-                    let mut left = self.cursor_position.clone();
+                    let mut left = self.cursor_position;
                     self.buffer.begining_of_current_word(&mut left);
                     self.buffer.delete_segment(&left, &mut self.cursor_position);
                 }
@@ -517,7 +521,7 @@ impl VimMode<'_> {
                     self.buffer.pop_line(self.cursor_position.height);
                 }
                 KeyCode::Char('e') => {
-                    let mut right = self.cursor_position.clone();
+                    let mut right = self.cursor_position;
                     self.buffer.end_of_current_word(&mut right);
                     self.buffer
                         .delete_segment(&self.cursor_position, &mut right);
@@ -535,21 +539,21 @@ impl VimMode<'_> {
         if let Event::Key(KeyEvent { code, .. }) = event {
             let copy_string = match code {
                 KeyCode::Char('w') => {
-                    let mut right = self.cursor_position.clone();
+                    let mut right = self.cursor_position;
                     self.buffer.begining_of_next_word(&mut right);
                     self.buffer.get_segment(&self.cursor_position, &right)
                 }
                 KeyCode::Char('b') => {
-                    let mut left = self.cursor_position.clone();
+                    let mut left = self.cursor_position;
                     self.buffer.begining_of_current_word(&mut left);
 
                     self.buffer.get_segment(&left, &self.cursor_position)
                 }
                 KeyCode::Char('y') => self.buffer.text[self.cursor_position.height]
                     .raw_string
-                    .to_owned(),
+                    .clone(),
                 KeyCode::Char('e') => {
-                    let mut right = self.cursor_position.clone();
+                    let mut right = self.cursor_position;
                     self.buffer.end_of_current_word(&mut right);
                     self.buffer.get_segment(&self.cursor_position, &right)
                 }

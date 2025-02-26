@@ -1,4 +1,4 @@
-use crate::editor::terminal::{Position, Terminal};
+use crate::editor::terminal::{ScreenPosition, Terminal};
 use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{read, Event, KeyCode, KeyEvent};
 use crossterm::style::Color;
@@ -82,43 +82,41 @@ impl Theme {
             Terminal::execute().unwrap();
             Self::move_cursor(cursor_position);
             loop {
-                if let Ok(event) = read() {
-                    if let Event::Key(KeyEvent { code, .. }) = event {
-                        match code {
-                            KeyCode::Up => {
-                                if cursor_position > 1_usize {
-                                    cursor_position = cursor_position.saturating_sub(1);
-                                    Self::move_cursor(cursor_position);
-                                }
-                            }
-                            KeyCode::Down => {
-                                if choice_index == 4 {
-                                    cursor_position =
-                                        std::cmp::min(cursor_position.saturating_add(1), 7_usize);
-                                } else {
-                                    cursor_position =
-                                        std::cmp::min(cursor_position.saturating_add(1), 16_usize);
-                                }
+                if let Ok(Event::Key(KeyEvent { code, .. })) = read() {
+                    match code {
+                        KeyCode::Up => {
+                            if cursor_position > 1_usize {
+                                cursor_position = cursor_position.saturating_sub(1);
                                 Self::move_cursor(cursor_position);
                             }
-                            KeyCode::Enter => {
-                                if choice_index != 4 {
-                                    user_choices[choice_index] =
-                                        (*OPTIONS[cursor_position.saturating_sub(1)]).to_string();
-                                } else {
-                                    user_choices[choice_index] = (*CURSOR_OPTIONS
-                                        [cursor_position.saturating_sub(1)])
-                                    .to_string();
-                                }
-                                break;
+                        }
+                        KeyCode::Down => {
+                            if choice_index == 4 {
+                                cursor_position =
+                                    std::cmp::min(cursor_position.saturating_add(1), 7_usize);
+                            } else {
+                                cursor_position =
+                                    std::cmp::min(cursor_position.saturating_add(1), 16_usize);
                             }
-                            KeyCode::Esc => {
-                                // do not change the state at all and return
-                                return;
+                            Self::move_cursor(cursor_position);
+                        }
+                        KeyCode::Enter => {
+                            if choice_index == 4 {
+                                user_choices[choice_index] = (*CURSOR_OPTIONS
+                                    [cursor_position.saturating_sub(1)])
+                                .to_string();
+                            } else {
+                                user_choices[choice_index] =
+                                    (*OPTIONS[cursor_position.saturating_sub(1)]).to_string();
                             }
-                            _ => {
-                                //not addressing any other key presses
-                            }
+                            break;
+                        }
+                        KeyCode::Esc => {
+                            // do not change the state at all and return
+                            return;
+                        }
+                        _ => {
+                            //not addressing any other key presses
                         }
                     }
                 }
@@ -137,7 +135,7 @@ impl Theme {
 
     fn move_cursor(position: usize) {
         Terminal::hide_cursor().expect("Error hiding cursor");
-        Terminal::move_cursor_to(Position {
+        Terminal::move_cursor_to(ScreenPosition {
             height: position,
             width: 0,
         })

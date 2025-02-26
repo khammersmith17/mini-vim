@@ -28,8 +28,8 @@ pub enum Direction {
 
 impl Direction {
     // allows single source of cursor movement across modes
-    pub fn move_cursor(&self, cursor_position: &mut Position, buffer: &Buffer) {
-        match *self {
+    pub fn move_cursor(self, cursor_position: &mut Position, buffer: &Buffer) {
+        match self {
             //if not on last line, move down
             //if the next line is shorter, snap to the end of that line
             Direction::Down => {
@@ -215,13 +215,20 @@ impl TryFrom<Event> for HighlightCommand {
                 code, modifiers, ..
             }) => match (code, modifiers) {
                 (KeyCode::Char('c'), KeyModifiers::CONTROL) => Ok(Self::Copy),
-                (_, KeyModifiers::CONTROL) => Ok(Self::NoAction),
-                (KeyCode::Up, _) | (KeyCode::Char('k'), _) => Ok(Self::Move(Direction::Up)),
-                (KeyCode::Down, _) | (KeyCode::Char('j'), _) => Ok(Self::Move(Direction::Down)),
-                (KeyCode::Right, _) | (KeyCode::Char('l'), _) => Ok(Self::Move(Direction::Right)),
-                (KeyCode::Left, _) | (KeyCode::Char('h'), _) => Ok(Self::Move(Direction::Left)),
-                (KeyCode::Esc, _) => Ok(Self::RevertState),
-                (KeyCode::Backspace, _) => Ok(Self::Delete),
+                (KeyCode::Up | KeyCode::Char('k'), KeyModifiers::NONE) => {
+                    Ok(Self::Move(Direction::Up))
+                }
+                (KeyCode::Down | KeyCode::Char('j'), KeyModifiers::NONE) => {
+                    Ok(Self::Move(Direction::Down))
+                }
+                (KeyCode::Right | KeyCode::Char('l'), KeyModifiers::NONE) => {
+                    Ok(Self::Move(Direction::Right))
+                }
+                (KeyCode::Left | KeyCode::Char('h'), KeyModifiers::NONE) => {
+                    Ok(Self::Move(Direction::Left))
+                }
+                (KeyCode::Esc, KeyModifiers::NONE) => Ok(Self::RevertState),
+                (KeyCode::Backspace, KeyModifiers::NONE) => Ok(Self::Delete),
                 _ => Ok(Self::NoAction),
             },
             #[allow(clippy::as_conversions)]
@@ -272,7 +279,7 @@ impl TryFrom<Event> for VimHighlightCommand {
                 KeyCode::Char('l') => Ok(Self::Move(Direction::Right)),
                 KeyCode::Char('h') => Ok(Self::Move(Direction::Left)),
                 KeyCode::Char('$') => Ok(Self::Move(Direction::End)),
-                KeyCode::Char('0') => Ok(Self::Move(Direction::End)),
+                KeyCode::Char('0') => Ok(Self::Move(Direction::Home)),
                 KeyCode::Char('d') => Ok(Self::Delete),
                 KeyCode::Esc => Ok(Self::RevertState),
                 _ => Ok(Self::NoAction),
@@ -372,9 +379,7 @@ impl TryFrom<Event> for VimModeCommands {
                 (KeyCode::Char(':'), KeyModifiers::NONE) => {
                     Ok(Self::ComplexCommand(QueueInitCommand::Colon))
                 }
-                (KeyCode::Esc, KeyModifiers::NONE) | (KeyCode::Char('i'), KeyModifiers::NONE) => {
-                    Ok(Self::Exit)
-                }
+                (KeyCode::Esc | KeyCode::Char('i'), KeyModifiers::NONE) => Ok(Self::Exit),
 
                 _ => Ok(Self::NoAction),
             },
@@ -478,7 +483,8 @@ impl TryFrom<Event> for HelpCommand {
             Event::Key(KeyEvent {
                 code, modifiers, ..
             }) => match (code, modifiers) {
-                (KeyCode::Char('h'), KeyModifiers::CONTROL) | (KeyCode::Esc, _) => Ok(Self::Exit),
+                (KeyCode::Char('h'), KeyModifiers::CONTROL)
+                | (KeyCode::Esc, KeyModifiers::NONE) => Ok(Self::Exit),
                 _ => Ok(Self::NoAction),
             },
             #[allow(clippy::as_conversions)]
