@@ -1,4 +1,5 @@
 use super::clipboard_interface::ClipboardUtils;
+use super::{Search, Theme};
 use crate::editor::Terminal;
 use crate::editor::{
     editorcommands::{
@@ -11,7 +12,6 @@ use crate::editor::{
     },
 };
 use crossterm::event::{read, Event, KeyCode, KeyEvent};
-use crossterm::style::Color;
 use std::error::Error;
 
 enum ContinueState {
@@ -48,8 +48,7 @@ impl VimMode<'_> {
         cursor_position: &mut Position,
         screen_offset: &mut ScreenOffset,
         size: &mut Size,
-        h_color: Color,
-        t_color: Color,
+        theme: &Theme,
     ) -> bool {
         let res = self.start();
         debug_assert!(res.is_ok());
@@ -106,7 +105,11 @@ impl VimMode<'_> {
                             } // no action
                             ContinueState::InvalidCommand => {
                                 // if the command is invalid, render the help
-                                VimHelpScreen::render_help(&mut self.size, h_color, t_color);
+                                VimHelpScreen::render_help(
+                                    &mut self.size,
+                                    theme.highlight,
+                                    theme.text,
+                                );
                             }
                             ContinueState::JumpCursor(line) => {
                                 if self.jump_cursor_to(line) > 0 {
@@ -116,6 +119,21 @@ impl VimMode<'_> {
                             ContinueState::ExitSession => return false,
                         }
                     }
+                    VimModeCommands::Search => {
+                        let mut search = Search::new(
+                            self.cursor_position,
+                            self.screen_offset,
+                            theme.highlight,
+                            theme.text,
+                        );
+                        search.run(
+                            &mut self.cursor_position,
+                            &mut self.screen_offset,
+                            &mut self.size,
+                            &self.buffer,
+                        );
+                        needs_render = true;
+                    }
                     VimModeCommands::Highlight => {
                         let mut highlight = Highlight::new(
                             &mut self.cursor_position,
@@ -123,7 +141,7 @@ impl VimMode<'_> {
                             &mut self.size,
                             self.buffer,
                         );
-                        highlight.run(h_color, t_color, parse_highlight_vim_mode);
+                        highlight.run(theme.highlight, theme.text, parse_highlight_vim_mode);
                         if self.resolve_displacement() > 0 {
                             needs_render = true;
                         } // making sure the offset is correct on a delete
@@ -143,7 +161,7 @@ impl VimMode<'_> {
                         needs_render = true;
                     }
                     VimModeCommands::NoAction => {
-                        VimHelpScreen::render_help(&mut self.size, h_color, t_color);
+                        VimHelpScreen::render_help(&mut self.size, theme.highlight, theme.text);
                         needs_render = true;
                     } // skipping other
                 },

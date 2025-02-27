@@ -296,8 +296,7 @@ impl View {
             &mut self.cursor_position,
             &mut self.screen_offset,
             &mut self.size,
-            self.theme.highlight,
-            self.theme.text,
+            &self.theme,
         )
     }
 

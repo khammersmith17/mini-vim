@@ -336,6 +336,7 @@ pub enum VimModeCommands {
     BeginingOfCurrentWord,
     NewLine,
     Highlight,
+    Search,
     Paste,
     NoAction,
     Resize(Size),
@@ -361,6 +362,7 @@ impl TryFrom<Event> for VimModeCommands {
                 (KeyCode::Char('e'), KeyModifiers::NONE) => Ok(Self::EndOfCurrentWord),
                 (KeyCode::Char('w'), KeyModifiers::NONE) => Ok(Self::StartOfNextWord),
                 (KeyCode::Char('o'), KeyModifiers::NONE) => Ok(Self::NewLine),
+                (KeyCode::Char('/'), KeyModifiers::NONE) => Ok(Self::Search),
                 (KeyCode::Char('d'), KeyModifiers::NONE) => {
                     Ok(Self::ComplexCommand(QueueInitCommand::Delete))
                 }
