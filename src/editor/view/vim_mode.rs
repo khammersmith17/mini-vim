@@ -313,7 +313,7 @@ impl VimMode<'_> {
             0 => {}
             1 => {
                 self.screen_offset
-                    .update_offset_single_move(&self.cursor_position, &self.size, 1);
+                    .update_offset_single_move(&self.cursor_position, &self.size, 2);
             }
             _ => {
                 self.screen_offset.handle_offset_screen_snap(

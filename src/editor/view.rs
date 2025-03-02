@@ -375,7 +375,9 @@ impl View {
                 render_type = ScreenUpdateType::FullScreen;
             }
             EditorCommand::VimMode => {
-                self.enter_vim_mode();
+                if !self.enter_vim_mode() {
+                    return Ok(false);
+                }
                 render_type = ScreenUpdateType::FullScreen;
             }
             EditorCommand::Highlight => {
