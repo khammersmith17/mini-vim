@@ -14,7 +14,6 @@ use editorcommands::EditorCommand;
 #[derive(Default)]
 pub struct Editor {
     view: View,
-    // should_quit: bool,
 }
 
 impl Editor {
