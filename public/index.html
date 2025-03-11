@@ -23,12 +23,37 @@
     <div class="container">
       <div class="page-body">
         
+          <div class="repo_banner">
+            <a href="https://github.com/khammersmith17/text-editor.git">
+              <div class="github-icon" aria-hidden="true"></div>
+              Check out our GitHub!
+            </a>
+          </div>
+        
 
         <main>
           <header>
             
             <h1 class="title">mini-vim</h1>
             
+  <nav class="nav">
+    <ul>
+      <li><a href="/">Home</a></li>
+
+      
+
+      
+
+      
+
+      
+
+      
+        <li><a href="/changelog/">Changelog</a></li>
+      
+    </ul>
+  </nav>
+
           </header>
 
           
@@ -37,7 +62,7 @@
     <h2>Mini-Vim</h2>
 <p>This is a terminal based text editor. Currently it supports any text editing (utf-8 characters work better at the moment than other characters), setting the theme, searching, resizing the terminal, and saving, among other things, such as copy and paste. There is also support for the most common vim key bindings.</p>
 <p>The goal for this editor is to be more like Vim than nano, but more lightweight than vim itself. Vim has a relatively steep learning curve, this can serve as an entry to get comfortable with editing files in the terminal. I also hope you find it responsive. This is written in pure Rust and uses the crossterm crate for all event reading, as well as the famous rust-clipboard for reading and writing to the OS clipboard. At some point, it might be fun to hand roll this.</p>
-<p>I developed this on MacOS. If the installer does not run on your target platform, or some features do not work, please leave an issue.</p>
+<p>I developed this on MacOS. If the installer does not run on your target platform, or some features do not work, please leave an issue. I am trying out Cargo dist to build an installer, at some point I will hand roll it.</p>
 <p>Until the installer is ready, you can fork the repo and try yourself.
 To run a fresh working file simply execute cargo run
 To edit an existing file: cargo run {filename}</p>
@@ -107,6 +132,8 @@ GG = page down<br>
       </div>
 
       <footer>
+        
+          <a href="https://github.com/khammersmith17/text-editor.git"><div class="github-icon" aria-hidden="true"></div></a>
         
         <span>
           mini-vim
