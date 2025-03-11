@@ -1,7 +1,9 @@
 ## Mini-Vim
-This is a terminal based text editor. Currently it supports any text editing (utf-8 characters work better at the moment than other characters), setting the theme, searching, resizing the terminal, and saving, among other things.
+This is a terminal based text editor. Currently it supports any text editing (utf-8 characters work better at the moment than other characters), setting the theme, searching, resizing the terminal, and saving, among other things, such as copy and paste. There is also support for the most common vim key bindings.
 
-I am currently working on adding syntax highlighting and search highlighting. Eventually, I would like to also build an installer for it. The terminal interaction is using the crossterm crate.
+The goal for this editor is to be more like Vim than nano, but more lightweight than vim itself. Vim has a relatively steep learning curve, this can serve as an entry to get comfortable with editing files in the terminal. I also hope you find it responsive. This is written in pure Rust and uses the crossterm crate for all event reading, as well as the famous rust-clipboard for reading and writing to the OS clipboard. At some point, it might be fun to hand roll this.
+
+I developed this on MacOS. If the installer does not run on your target platform, or some features do not work, please leave an issue.
 
 Until the installer is ready, you can fork the repo and try yourself.
 To run a fresh working file simply execute cargo run
@@ -61,6 +63,7 @@ o = new-line\
 $ = snap right\
 d = delete\
 y = yank\
+/ = search mode\
 Esc | i = exit vim mode\
 gg = page up\
 GG = page down\
@@ -68,6 +71,7 @@ GG = page down\
 :wq = write and quit\
 :q = quit\
 :q! = quit without saving
+:{line number} = jump to line
 
 ## Jump Cursor Mode
 Type new line location when prompted. Press enter to jump to line
