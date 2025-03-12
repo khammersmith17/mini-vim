@@ -240,7 +240,7 @@ impl View {
             self.buffer.filename.as_deref(),
             Some((
                 self.cursor_position.height.saturating_add(1),
-                self.buffer.len(),
+                std::cmp::max(self.buffer.len(), 1),
             )),
         )?;
         Terminal::move_cursor_to(
@@ -344,8 +344,13 @@ impl View {
                 };
             }
             EditorCommand::Insert(char) => {
+                let was_empty = self.buffer.is_empty();
                 self.insert_char(char);
-                render_type = self.evaluate_view_state_change();
+                render_type = if was_empty {
+                    ScreenUpdateType::FullScreen
+                } else {
+                    self.evaluate_view_state_change()
+                };
             }
             EditorCommand::Delete => {
                 self.deletion();
