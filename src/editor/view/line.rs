@@ -19,15 +19,6 @@ pub enum GraphemeWidth {
 }
 
 #[derive(Debug, Clone)]
-struct TextFragmentError;
-
-impl fmt::Display for TextFragmentError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "Error using TextFragment")
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct TextFragment {
     pub grapheme: String,
     pub render_width: GraphemeWidth,
