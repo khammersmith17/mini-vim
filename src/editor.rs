@@ -157,41 +157,6 @@ impl Editor {
             }
         }
     }
-
-    /*
-    fn refresh_screen(&mut self) -> Result<(), Error> {
-        Terminal::hide_cursor()?;
-        Terminal::move_cursor_to(self.view.screen_offset.to_position())?;
-        Terminal::clear_screen()?;
-        /*
-                if self.should_quit {
-                    Terminal::print("Goodbye.\r\n")?;
-                } else if self.view.needs_redraw {
-                    let _ = self.view.render(true);
-                }
-        */
-        let _ = self.view.render(true);
-        Terminal::render_status_line(
-            Mode::Insert,
-            self.buffer.is_saved,
-            &self.size,
-            self.buffer.filename.as_deref(),
-            Some((
-                self.cursor_position.height.saturating_add(1),
-                self.buffer.len(),
-            )),
-        )?;
-        Terminal::render_status_line()
-        Terminal::move_cursor_to(
-            self.view
-                .cursor_position
-                .relative_view_position(&self.view.screen_offset),
-        )?;
-        Terminal::show_cursor()?;
-        Terminal::execute()?;
-        Ok(())
-    }
-    */
 }
 
 impl Drop for Editor {
