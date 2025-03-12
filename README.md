@@ -1,5 +1,5 @@
 ## Mini-Vim
-This is a terminal based text editor. Currently it supports any text editing (utf-8 characters work better at the moment than other characters), setting the theme, searching, resizing the terminal, and saving, among other things, such as copy and paste. There is also support for the most common vim key bindings.
+This is a terminal based text editor. Currently it supports any text editing (utf-8 characters work better at the moment than other characters), setting the theme, searching, resizing the terminal, and saving, among other things, such as copy and paste. There is also support for the most common vim key bindings. The idea here is to be an entry into a vim style editor, defaulting to arrows to move around and an opt in for vim style key bindings.
 
 The goal for this editor is to be more like Vim than nano, but more lightweight than vim itself. Vim has a relatively steep learning curve, this can serve as an entry to get comfortable with editing files in the terminal. I also hope you find it responsive. This is written in pure Rust and uses the crossterm crate for all event reading, as well as the famous rust-clipboard for reading and writing to the OS clipboard. At some point, it might be fun to hand roll this.
 
