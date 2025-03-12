@@ -57,10 +57,10 @@ impl Editor {
                         break;
                     }
                 }
-                Err(err) => {
+                Err(_err) => {
                     #[cfg(debug_assertions)]
                     {
-                        panic!("Could not read event: {err}");
+                        panic!("Could not read event: {_err}");
                     }
                 }
             }
@@ -103,10 +103,10 @@ impl Editor {
                         return Ok(should_continue);
                     }
                 }
-                Err(err) => {
+                Err(_err) => {
                     #[cfg(debug_assertions)]
                     {
-                        panic!("Could not handle command {err:?}")
+                        panic!("Could not handle command {_err:?}")
                     }
                 }
             }
@@ -148,10 +148,10 @@ impl Editor {
                         // doing nothing for other events
                     }
                 }
-                Err(err) => {
+                Err(_err) => {
                     #[cfg(debug_assertions)]
                     {
-                        panic!("Could not handle event {err}");
+                        panic!("Could not handle event {_err}");
                     }
                 }
             }
