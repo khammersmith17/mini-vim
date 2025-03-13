@@ -3,11 +3,20 @@ This is a terminal based text editor. Currently it supports any text editing (ut
 
 The goal for this editor is to be more like Vim than nano, but more lightweight than vim itself. Vim has a relatively steep learning curve, this can serve as an entry to get comfortable with editing files in the terminal. I also hope you find it responsive. This is written in pure Rust and uses the crossterm crate for all event reading, as well as the famous rust-clipboard for reading and writing to the OS clipboard. At some point, it might be fun to hand roll this.
 
-I developed this on MacOS. If the installer does not run on your target platform, or some features do not work, please leave an issue. I am trying out Cargo dist to build an installer, at some point I will hand roll it.
+I developed this on MacOS. If the installer does not run on your target platform, or some features do not work, please leave an issue. For now I was only able to get the build to work for MacOS and windows. Hoping to get the linux build wokring soon. I am trying out Cargo dist to build an installer, at some point I will hand roll it.
 
-Until the installer is ready, you can fork the repo and try yourself.
-To run a fresh working file simply execute cargo run
-To edit an existing file: cargo run {filename}
+## Installation 
+To install on MacOS using the shell script:
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/khammersmith17/text-editor/releases/download/v0.2.0/mini-vim-installer.sh | sh
+```
+
+To install using powershell on Windows:
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/khammersmith17/text-editor/releases/download/v0.2.0/mini-vim-installer.ps1 | iex"
+```
+
+
 
 ## Modes
 There are essentially 7 modes: normal, search, save as, vim motions, highlight text, jump to line, and set theme.\
