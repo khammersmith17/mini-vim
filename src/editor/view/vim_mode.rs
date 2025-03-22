@@ -464,7 +464,7 @@ impl VimMode<'_> {
         if let Ok(line) = string_queue.parse::<usize>() {
             return Ok(vec![ColonQueueActions::Jump(line)]);
         }
-        let mut res: Vec<ColonQueueActions> = Vec::new();
+        let mut res: Vec<ColonQueueActions> = Vec::with_capacity(6);
         for c in string_queue.chars() {
             let mapped_val = ColonQueueActions::try_from(c)?;
             res.push(mapped_val);

@@ -45,9 +45,10 @@ impl Buffer {
         }
     }
 
-    pub fn load_named_empty(filename: &str) -> Buffer {
+    pub fn load_named_empty(filename: &str, screen_height: usize) -> Buffer {
+        let text: Vec<Line> = Vec::with_capacity(screen_height);
         Self {
-            text: Vec::new(),
+            text,
             filename: Some(filename.to_string()),
             is_saved: false,
         }
@@ -55,7 +56,9 @@ impl Buffer {
 
     pub fn load(filename: &str) -> Result<Buffer, Error> {
         let file_contents = read_to_string(filename)?;
-        let mut text = Vec::new();
+        // size of file + 10% for starting capacity
+        let starting_capacity = (file_contents.len() as f32 * 1.1_f32) as usize;
+        let mut text = Vec::with_capacity(starting_capacity);
         for line in file_contents.lines() {
             text.push(Line::from(line));
         }

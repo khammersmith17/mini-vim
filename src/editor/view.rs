@@ -148,7 +148,7 @@ impl View {
         if let Ok(buffer) = Buffer::load(filename) {
             self.buffer = buffer;
         } else {
-            self.buffer = Buffer::load_named_empty(filename);
+            self.buffer = Buffer::load_named_empty(filename, self.size.height);
         }
 
         Ok(())
