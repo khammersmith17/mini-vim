@@ -57,7 +57,7 @@ impl Buffer {
     pub fn load(filename: &str) -> Result<Buffer, Error> {
         let file_contents = read_to_string(filename)?;
         // size of file + 10% for starting capacity
-        let starting_capacity = (file_contents.len() as f32 * 1.1_f32) as usize;
+        let starting_capacity = (file_contents.len() as f32 * 1.1_f32).ceil() as usize;
         let mut text = Vec::with_capacity(starting_capacity);
         for line in file_contents.lines() {
             text.push(Line::from(line));

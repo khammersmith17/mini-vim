@@ -11,6 +11,72 @@ use view::View;
 pub mod editorcommands;
 use editorcommands::EditorCommand;
 
+// approach to multi buffer editing
+// we need a structure to store the state for each different open buffer
+// we will need some sort of context switiching logic
+// then something to store state
+/*
+
+
+enum BufferState {
+    Normal,
+    Vim
+}
+
+pub struct Editor {
+    size: Size, //size will always be shared across all buffers
+    theme: Theme, //theme will always be shared across all buffer
+    cursor_position: Vec<Position>,
+    screen_offset: Vec<ScreenOffset>,
+    buffer: Vec<Buffer>,
+    state: Vec<BufferState>
+}
+
+maybe should be this
+struct BufferSession {
+    screen_position: Position,
+    screen_offset: ScreenOffset,
+    buffer: Buffer,
+    state: BufferState
+}
+
+default
+    - init screen position and offset at origin
+    - load in buffer if file exists
+    - start buffer state in normal mode
+
+switch between vim mode and normal mode
+    - exit the current state
+    - then move into the other BufferState
+
+switch between buffers
+    - preserve state of current buffer
+    - if the new buffer is already open, just switch
+    - otherwise, open a new buffer and add to our Editor session
+
+with this there are 2 types of context switches
+    - switching to another buffer
+    - switching the state of the buffer
+
+struct Editor {
+    size: Size,
+    theme: Theme,
+    open_buffers: Vec<BufferSession>
+
+}
+
+make sure there is only 1 reference to the size and terminal theme at any given time
+we need to limit this because we need a mutable reference, thus only 1 should be live
+
+other things to consider
+- this should be the new structure
+- vim mode should be moved out to be at the same level as view
+    - then we switch between modes by passing the state from the Editor
+    - creating and destroy a new view/vim instance as needed
+    - then there needs to some indicator of exit state
+- on session exit, need to check all open buffers for saved status
+*/
+
 #[derive(Default)]
 pub struct Editor {
     view: View,
@@ -19,6 +85,8 @@ pub struct Editor {
 impl Editor {
     pub fn new() -> Result<Self, Error> {
         let current_hook = take_hook();
+        // here we need to set the panic hook to ensure that when panic occurs
+        // the terminal itself moves back into the normal state
         set_hook(Box::new(move |panic_info| {
             let _ = Terminal::terminate();
             current_hook(panic_info);
@@ -34,10 +102,7 @@ impl Editor {
                 ));
             };
         }
-        Ok(Self {
-            // should_quit: false,
-            view,
-        })
+        Ok(Self { view })
     }
 
     pub fn run(&mut self) -> Result<(), Error> {
