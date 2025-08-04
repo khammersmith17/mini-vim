@@ -8,12 +8,12 @@ I developed this on MacOS. If the installer does not run on your target platform
 ## Installation 
 To install on MacOS using the shell script:
 ```bash
-curl --proto '=https' --tlsv1.2 -LsSf https://github.com/khammersmith17/text-editor/releases/download/v0.2.0/mini-vim-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/khammersmith17/mini-vim/releases/download/v0.2.0/mini-vim-installer.sh | sh
 ```
 
 To install using powershell on Windows:
 ```powershell
-powershell -ExecutionPolicy Bypass -c "irm https://github.com/khammersmith17/text-editor/releases/download/v0.2.0/mini-vim-installer.ps1 | iex"
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/khammersmith17/mini-vim/releases/download/v0.2.0/mini-vim-installer.ps1 | iex"
 ```
 
 
